@@ -1,386 +1,274 @@
 const DM = {
-  common: 'Общий',
-  logs: 'Логи',
-  ranking: 'Рейтинг',
-  plusSheets: ['Плюсы_Артём', 'Плюсы_Рами', 'Плюсы_Немат'],
+  // Вставьте ID четырёх Google-таблиц. ID находится между /d/ и /edit в URL.
+  centralFileId: '1RIDAw8VWB76L6E2RDaiSiyj9UlLk0c0P-rfs3WivcFM',
+  plusFileIds: {
+    'Артём': '',
+    'Рами': '',
+    'Немат': ''
+  },
   practitioners: ['Артём', 'Рами', 'Немат'],
+  common: 'Общий',
+  cw: 'CW',
+  ranking: 'Рейтинг',
+  logs: 'Логи',
   practiceCount: 15,
-  blockSize: 33,
   studentsPerGroup: 30,
+  plusHeaderRow: 3,
+  plusFirstRow: 4,
   taskFirstCol: 6,
   taskLastCol: 35,
   commonFirstRow: 4,
   commonLastRow: 93,
   logFirstRow: 4,
-  logMaxRow: 3006,
-  // Заполните адресами практиков, если нужно технически запретить студентам 1 и -.
-  // Пустой список оставлен для совместимости с тестовыми аккаунтами.
-  practitionerEmails: []
+  logMaxRow: 3006
 };
 
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('DM система')
-    .addItem('Установить проверки и цвета', 'installDmSystem')
-    .addItem('Синхронизировать группы', 'syncGroupAssignments')
+    .addItem('Настроить 4 файла', 'installDmSystem')
+    .addItem('Синхронизировать группы', 'syncGroups_')
     .addItem('Синхронизировать таблицу', 'syncTable')
     .addToUi();
 }
 
 function installDmSystem() {
-  setupValidations_();
-  applyConditionalFormatting_();
-  const ranking = SpreadsheetApp.getActive().getSheetByName(DM.ranking);
-  if (ranking) {
-    ranking.getRange(3, 1, 1, 9).clearContent();
-    ranking.getRange(3, 1, 1, 6).setValues([['ФИО', 'Практик', 'TG', 'D', 'CW', 'Тир']]);
-  }
-  syncGroupAssignments();
-  refreshTotals();
-  SpreadsheetApp.getActive().toast('Проверки, цвета, группы и расчёты обновлены.');
+  validateConfig_();
+  setupTriggers_();
+  syncGroups_();
+  refreshCentral_();
+  SpreadsheetApp.getActive().toast('Центральная таблица и три файла практиков настроены.');
 }
 
-function onEdit(e) {
-  if (!e || !e.range) return;
-  const range = e.range;
-  const sheet = range.getSheet();
-  const values = range.getValues();
-  const row0 = range.getRow();
-  const col0 = range.getColumn();
-
-  for (let r = 0; r < values.length; r++) {
-    for (let c = 0; c < values[r].length; c++) {
-      const cell = sheet.getRange(row0 + r, col0 + c);
-      const row = cell.getRow();
-      const col = cell.getColumn();
-
-      if (sheet.getName() === DM.common && row >= DM.commonFirstRow && row <= DM.commonLastRow) {
-        if (col >= 1 && col <= 3) {
-          if (col === 2) handlePractitionerEdit_(row, e);
-          syncGroupAssignments();
-        } else if (col === 4) {
-          handleПродEdit_(row);
-          syncVisibility_();
-          refreshTotals();
-        }
-        continue;
-      }
-
-      if (sheet.getName() === 'CW' ||
-          (sheet.getName() === DM.logs && row >= DM.logFirstRow && (col === 8 || col === 10))) {
-        refreshTotals();
-        continue;
-      }
-
-      if (DM.plusSheets.indexOf(sheet.getName()) !== -1) {
-        processPlusEdit_(sheet, cell, e);
-      }
-    }
-  }
+// Установочный триггер должен быть создан для всех четырёх таблиц.
+function setupTriggers_() {
+  const ids = [getCentralId_()].concat(DM.practitioners.map(name => DM.plusFileIds[name]));
+  ScriptApp.getProjectTriggers().forEach(trigger => {
+    if (trigger.getHandlerFunction() === 'handleEdit_') ScriptApp.deleteTrigger(trigger);
+  });
+  ids.filter(Boolean).forEach(id => {
+    ScriptApp.newTrigger('handleEdit_').forSpreadsheet(id).onEdit().create();
+  });
 }
 
-function processPlusEdit_(sheet, cell, event) {
-  const col = cell.getColumn();
-  const row = cell.getRow();
-  if (col < DM.taskFirstCol || col > DM.taskLastCol) return;
-
-  const practitionerNo = DM.plusSheets.indexOf(sheet.getName()) + 1;
-  for (let practiceNo = 1; practiceNo <= DM.practiceCount; practiceNo++) {
-    const blockStart = 4 + (practiceNo - 1) * DM.blockSize;
-    const plusHeader = blockStart + 1;
-    const plusFirst = blockStart + 2;
-    const plusLast = plusFirst + DM.studentsPerGroup - 1;
-    if (row < plusFirst || row > plusLast) continue;
-
-    const value = String(cell.getDisplayValue()).trim();
-    const oldValue = event && event.range.getNumRows() === 1 && event.range.getNumColumns() === 1
-      ? String(event.oldValue || '').trim()
-      : '';
-    const studentName = String(sheet.getRange(row, 1).getDisplayValue()).trim();
-    const taskName = String(sheet.getRange(plusHeader, col).getDisplayValue()).trim();
-    if (!studentName || !taskName) return;
-
-    if ((value === '1' || value === '-') && !isPractitionerEditor_()) {
-      cell.setValue(oldValue === '+' ? '+' : '');
-      SpreadsheetApp.getActive().toast('1 и - доступны только практикам.');
-      return;
-    }
-
-    if (value === '1') {
-      removeLogRecord_(practitionerNo, practiceNo, studentName, taskName, 'Штраф -2');
-      if (oldValue !== '1') {
-        const result = registerUpperOne_(practitionerNo, practiceNo, studentName, taskName);
-        cell.setNote(result.message || '');
-        if (!result.ok) {
-          cell.setValue(oldValue === '+' ? '+' : '');
-          return;
-        }
-      }
-      refreshTotals();
-    } else if (value === '-') {
-      removeLogRecord_(practitionerNo, practiceNo, studentName, taskName);
-      if (oldValue !== '-') registerPenalty_(practitionerNo, practiceNo, studentName, taskName);
-      cell.setNote('Штраф -2 балла без коэффициента.');
-      refreshTotals();
-    } else if (value === '' || value === '+') {
-      if (oldValue === '1' || oldValue === '-') {
-        removeLogRecord_(practitionerNo, practiceNo, studentName, taskName);
-        refreshTotals();
-      }
-    }
+// Это единственный обработчик изменений во всех четырёх Google-таблицах.
+function handleEdit_(event) {
+  if (!event || !event.range || !event.source) return;
+  const sourceId = event.source.getId();
+  if (sourceId === getCentralId_()) {
+    handleCentralEdit_(event);
     return;
   }
+  const practitioner = DM.practitioners.find(name => DM.plusFileIds[name] === sourceId);
+  if (practitioner) handlePlusEdit_(event, practitioner);
 }
 
-function registerUpperOne_(practitionerNo, practiceNo, studentName, taskName) {
-  const lock = LockService.getDocumentLock();
-  lock.waitLock(30000);
-  try {
-    if (!isStudentActive_(practitionerNo, studentName)) {
-      return { ok: false, message: 'Студент неактивен на листе «Общий».' };
+function handleCentralEdit_(event) {
+  const sheet = event.range.getSheet();
+  const row = event.range.getRow();
+  const col = event.range.getColumn();
+  const central = event.source;
+
+  if (sheet.getName() === DM.common && row >= DM.commonFirstRow && row <= DM.commonLastRow) {
+    if (col === 2) appendTransferLog_(central, row, event);
+    if (col === 4) appendDepartureLog_(central, row);
+    if (col >= 1 && col <= 4) {
+      syncGroups_();
+      return;
     }
-    const ss = SpreadsheetApp.getActive();
-    const plusSheet = ss.getSheetByName(DM.plusSheets[practitionerNo - 1]);
-    return appendLogRow_(ss.getSheetByName(DM.logs), plusSheet,
-      practitionerNo, practiceNo, studentName, taskName);
-  } finally {
-    lock.releaseLock();
+  }
+
+  if (sheet.getName() === DM.cw ||
+      (sheet.getName() === DM.logs && row >= DM.logFirstRow && (col === 8 || col === 10))) {
+    refreshCentral_();
   }
 }
 
-function appendLogRow_(logs, plusSheet, practitionerNo, practiceNo, studentName, taskName) {
+function handlePlusEdit_(event, practitioner) {
+  const sheet = event.range.getSheet();
+  const cell = event.range;
+  const row = cell.getRow();
+  const col = cell.getColumn();
+  if (col < DM.taskFirstCol || col > DM.taskLastCol) return;
+
+  const practiceNo = practiceFromSheet_(sheet);
+  if (!practiceNo) return;
+  const plusHeader = DM.plusHeaderRow;
+  const plusFirst = DM.plusFirstRow;
+  const plusLast = plusFirst + DM.studentsPerGroup - 1;
+  if (row < plusFirst || row > plusLast) return;
+
+  const value = String(cell.getDisplayValue()).trim();
+  const oldValue = event.range.getNumRows() === 1 && event.range.getNumColumns() === 1
+    ? String(event.oldValue || '').trim() : '';
+  const studentName = String(sheet.getRange(row, 1).getDisplayValue()).trim();
+  const taskName = String(sheet.getRange(plusHeader, col).getDisplayValue()).trim();
+  if (!studentName || !taskName) return;
+
+  const central = SpreadsheetApp.openById(getCentralId_());
+  const practitionerNo = DM.practitioners.indexOf(practitioner) + 1;
+
+  if (value === '1') {
+    removeLogRecord_(central, practitioner, practiceNo, studentName, taskName, true);
+    if (oldValue !== '1') {
+      const result = appendNormalLog_(central, event.source, sheet, practitionerNo,
+        practitioner, practiceNo, studentName, taskName);
+      if (!result.ok) {
+        cell.setValue(oldValue === '+' ? '+' : '');
+        event.source.toast(result.message);
+        return;
+      }
+      cell.setNote(result.message);
+    }
+    refreshCentral_();
+    return;
+  }
+
+  if (value === '-') {
+    removeLogRecord_(central, practitioner, practiceNo, studentName, taskName, false);
+    if (oldValue !== '-') appendPenaltyLog_(central, practitioner, practiceNo, studentName, taskName);
+    cell.setNote('Штраф -2 балла без коэффициента.');
+    refreshCentral_();
+    return;
+  }
+
+  if (value === '' || value === '+') {
+    if (oldValue === '1' || oldValue === '-') {
+      removeLogRecord_(central, practitioner, practiceNo, studentName, taskName, false);
+      refreshCentral_();
+    }
+  }
+}
+
+function appendNormalLog_(central, plusFile, plusSheet, practitionerNo,
+                         practitioner, practiceNo, studentName, taskName) {
+  if (!isStudentActive_(central, practitioner, studentName)) {
+    return { ok: false, message: 'Студент неактивен или уже находится у другого практика.' };
+  }
+
+  const logs = central.getSheetByName(DM.logs);
   const lastRow = findLastLogRow_(logs);
-  const data = lastRow >= DM.logFirstRow
-    ? logs.getRange(DM.logFirstRow, 1, lastRow - DM.logFirstRow + 1, 9).getDisplayValues()
-    : [];
-  const practitionerName = DM.practitioners[practitionerNo - 1];
+  const rows = lastRow >= DM.logFirstRow
+    ? logs.getRange(DM.logFirstRow, 1, lastRow - DM.logFirstRow + 1, 9).getDisplayValues() : [];
   let studentExit = 0;
   let pairCount = 0;
   let duplicateCount = 0;
 
-  data.forEach(row => {
-    const rowStudent = String(row[0]).trim();
-    const rowStatus = String(row[8]).trim();
-    const isPenalty = String(row[5]).trim() === '' && String(row[6]).trim() === '' && Number(row[7]) === -2;
-    if (rowStudent !== studentName || isPenalty || rowStatus === 'Ушёл на базу' || rowStatus === 'ушел на базу') return;
+  rows.forEach(row => {
+    const penalty = String(row[5]).trim() === '' && String(row[6]).trim() === '' && Number(row[7]) === -2;
+    const departureOrTransfer = ['ушел на базу', 'переведен из'].some(status => String(row[8]).indexOf(status) === 0);
+    if (String(row[0]).trim() !== studentName || penalty || departureOrTransfer) return;
     studentExit++;
     if (Number(row[2]) === practiceNo) pairCount++;
     if (Number(row[2]) === practiceNo && tasksEqual_(row[3], taskName)) duplicateCount++;
   });
 
   if (pairCount >= 2) return { ok: false, message: 'У студента уже два выхода за эту практику.' };
-  if (duplicateCount > 0) return { ok: false, message: 'Эта задача уже есть в «Логах».' };
+  if (duplicateCount > 0) return { ok: false, message: 'Эта задача уже есть в логах.' };
 
-  const blockStart = 4 + (practiceNo - 1) * DM.blockSize;
-  const studentRow = findStudentRow_(plusSheet, studentName, blockStart + 2, blockStart + 31);
-  if (!studentRow) return { ok: false, message: 'Студент не найден на плюсовике.' };
+  const plusFirst = DM.plusFirstRow;
+  const studentRow = findStudentRow_(plusSheet, studentName, plusFirst, plusFirst + DM.studentsPerGroup - 1);
+  if (!studentRow) return { ok: false, message: 'Студент не найден в файле практика.' };
   const coefficient = Number(plusSheet.getRange(studentRow, 4).getValue()) || 0.5;
   const exitNo = studentExit + 1;
   const base = ladderPoints_(exitNo);
   const newRow = Math.max(findLastLogRow_(logs) + 1, DM.logFirstRow);
-
   logs.getRange(newRow, 1, 1, 11).setValues([[
-    studentName, practitionerName, practiceNo, taskName, exitNo,
+    studentName, practitioner, practiceNo, taskName, exitNo,
     base, coefficient, '', exitNo > 15 ? 'Дополнительный выход' : 'Назначен', '', new Date()
   ]]);
-  logs.getRange(newRow, 8).setFormula(`=IF(OR(F${newRow}="",G${newRow}=""),"",F${newRow}*G${newRow}+IF(J${newRow}="",0,J${newRow}))`);
+  logs.getRange(newRow, 8).setFormula(
+    `=IF(OR(F${newRow}="",G${newRow}=""),"",F${newRow}*G${newRow}+IF(J${newRow}="",0,J${newRow}))`
+  );
   logs.getRange(newRow, 11).setNumberFormat('yyyy-mm-dd hh:mm');
   return { ok: true, message: `Начислено D: ${base * coefficient}` };
 }
 
-function registerPenalty_(practitionerNo, practiceNo, studentName, taskName) {
-  const logs = SpreadsheetApp.getActive().getSheetByName(DM.logs);
+function appendPenaltyLog_(central, practitioner, practiceNo, studentName, taskName) {
+  const logs = central.getSheetByName(DM.logs);
   const newRow = Math.max(findLastLogRow_(logs) + 1, DM.logFirstRow);
   logs.getRange(newRow, 1, 1, 11).setValues([[
-    studentName, DM.practitioners[practitionerNo - 1], practiceNo, taskName,
-    '', '', '', -2, '', '', new Date()
+    studentName, practitioner, practiceNo, taskName, '', '', '', -2, '', '', new Date()
   ]]);
   logs.getRange(newRow, 11).setNumberFormat('yyyy-mm-dd hh:mm');
 }
 
-function removeLogRecord_(practitionerNo, practiceNo, studentName, taskName, onlyStatus) {
-  const lock = LockService.getDocumentLock();
-  lock.waitLock(30000);
-  try {
-    const logs = SpreadsheetApp.getActive().getSheetByName(DM.logs);
-    const lastRow = findLastLogRow_(logs);
-    if (lastRow < DM.logFirstRow) return { ok: false };
-    const data = logs.getRange(DM.logFirstRow, 1, lastRow - DM.logFirstRow + 1, 9).getDisplayValues();
-    for (let i = 0; i < data.length; i++) {
-      const row = data[i];
-      const isPenalty = String(row[5]).trim() === '' && String(row[6]).trim() === '' && Number(row[7]) === -2;
-      const statusMatches = !onlyStatus || (onlyStatus === 'Штраф -2' ? isPenalty : String(row[8]).trim() === onlyStatus);
-      const same = String(row[0]).trim() === studentName &&
-        String(row[1]).trim() === DM.practitioners[practitionerNo - 1] &&
-        Number(row[2]) === practiceNo && tasksEqual_(row[3], taskName) &&
-        statusMatches;
-      if (same) logs.getRange(DM.logFirstRow + i, 1, 1, 11).clearContent();
-    }
-    return { ok: true };
-  } finally {
-    lock.releaseLock();
-  }
+function removeLogRecord_(central, practitioner, practiceNo, studentName, taskName, onlyPenalty) {
+  const logs = central.getSheetByName(DM.logs);
+  const lastRow = findLastLogRow_(logs);
+  if (lastRow < DM.logFirstRow) return;
+  const rows = logs.getRange(DM.logFirstRow, 1, lastRow - DM.logFirstRow + 1, 9).getDisplayValues();
+  rows.forEach((row, index) => {
+    const penalty = String(row[5]).trim() === '' && String(row[6]).trim() === '' && Number(row[7]) === -2;
+    const same = String(row[0]).trim() === studentName &&
+      String(row[1]).trim() === practitioner && Number(row[2]) === practiceNo &&
+      tasksEqual_(row[3], taskName) && (!onlyPenalty || penalty);
+    if (same) logs.getRange(DM.logFirstRow + index, 1, 1, 11).clearContent();
+  });
 }
 
-function handleПродEdit_(commonRow) {
-  const common = SpreadsheetApp.getActive().getSheetByName(DM.common);
-  const status = String(common.getRange(commonRow, 4).getDisplayValue()).trim();
-  if (status !== 'Нет') return;
-  const studentName = String(common.getRange(commonRow, 1).getDisplayValue()).trim();
+function appendTransferLog_(central, commonRow, event) {
+  if (!event || !event.oldValue || event.range.getNumRows() !== 1 || event.range.getNumColumns() !== 1) return;
+  const common = central.getSheetByName(DM.common);
+  const student = String(common.getRange(commonRow, 1).getDisplayValue()).trim();
+  const next = String(common.getRange(commonRow, 2).getDisplayValue()).trim();
+  const previous = String(event.oldValue).trim();
+  if (!student || !next || !previous || previous === next) return;
+  appendStatusLog_(central, student, next, `переведен из ${previous} в ${next}`);
+}
+
+function appendDepartureLog_(central, commonRow) {
+  const common = central.getSheetByName(DM.common);
+  if (String(common.getRange(commonRow, 4).getDisplayValue()).trim() !== 'Нет') return;
+  const student = String(common.getRange(commonRow, 1).getDisplayValue()).trim();
   const practitioner = String(common.getRange(commonRow, 2).getDisplayValue()).trim();
-  if (!studentName || !practitioner || hasDepartureLog_(studentName, practitioner)) return;
+  if (!student || !practitioner || hasStatusLog_(central, student, practitioner, 'ушел на базу')) return;
+  appendStatusLog_(central, student, practitioner, 'ушел на базу');
+}
 
-  const logs = SpreadsheetApp.getActive().getSheetByName(DM.logs);
+function appendStatusLog_(central, student, practitioner, status) {
+  const logs = central.getSheetByName(DM.logs);
   const newRow = Math.max(findLastLogRow_(logs) + 1, DM.logFirstRow);
   logs.getRange(newRow, 1, 1, 11).setValues([[
-    studentName, practitioner, '', '', '', '', '', '', 'ушел на базу', '', new Date()
+    student, practitioner, '', '', '', '', '', '', status, '', new Date()
   ]]);
   logs.getRange(newRow, 11).setNumberFormat('yyyy-mm-dd hh:mm');
 }
 
-function handlePractitionerEdit_(commonRow, event) {
-  if (!event || !event.range || event.range.getNumRows() !== 1 || event.range.getNumColumns() !== 1) return;
-  const oldPractitioner = String(event.oldValue || '').trim();
-  const common = SpreadsheetApp.getActive().getSheetByName(DM.common);
-  const newPractitioner = String(common.getRange(commonRow, 2).getDisplayValue()).trim();
-  const studentName = String(common.getRange(commonRow, 1).getDisplayValue()).trim();
-  if (!studentName || !oldPractitioner || !newPractitioner || oldPractitioner === newPractitioner) return;
-
-  const logs = SpreadsheetApp.getActive().getSheetByName(DM.logs);
-  const newRow = Math.max(findLastLogRow_(logs) + 1, DM.logFirstRow);
-  logs.getRange(newRow, 1, 1, 11).setValues([[
-    studentName, newPractitioner, '', '', '', '', '', '',
-    `переведен из ${oldPractitioner} в ${newPractitioner}`, '', new Date()
-  ]]);
-  logs.getRange(newRow, 11).setNumberFormat('yyyy-mm-dd hh:mm');
-}
-
-function hasDepartureLog_(studentName, practitioner) {
-  const logs = SpreadsheetApp.getActive().getSheetByName(DM.logs);
+function hasStatusLog_(central, student, practitioner, status) {
+  const logs = central.getSheetByName(DM.logs);
   const lastRow = findLastLogRow_(logs);
   if (lastRow < DM.logFirstRow) return false;
   return logs.getRange(DM.logFirstRow, 1, lastRow - DM.logFirstRow + 1, 9).getDisplayValues()
-    .some(row => String(row[0]).trim() === studentName &&
-      String(row[1]).trim() === practitioner &&
-      ['ушел на базу', 'Ушёл на базу'].indexOf(String(row[8]).trim()) !== -1);
+    .some(row => String(row[0]).trim() === student && String(row[1]).trim() === practitioner && String(row[8]).trim() === status);
 }
 
-function refreshTotals() {
-  const ss = SpreadsheetApp.getActive();
-  const common = ss.getSheetByName(DM.common);
+function syncTable() {
+  validateConfig_();
+  syncGroups_();
+  SpreadsheetApp.getActive().toast('Центральная таблица синхронизирована.');
+}
+
+function refreshCentral_() {
+  const central = SpreadsheetApp.openById(getCentralId_());
+  const common = central.getSheetByName(DM.common);
   for (let row = DM.commonFirstRow; row <= DM.commonLastRow; row++) {
     common.getRange(row, 5).setFormula(
       `=IF(A${row}="","",SUMIF('${DM.logs}'!$A$${DM.logFirstRow}:$A$${DM.logMaxRow},A${row},'${DM.logs}'!$H$${DM.logFirstRow}:$H$${DM.logMaxRow}))`
     );
-    common.getRange(row, 6).setFormula(
-      `=IF(A${row}="","",SUMIF('CW'!$A:$A,A${row},'CW'!$D:$D))`
-    );
+    common.getRange(row, 6).setFormula(`=IF(A${row}="","",SUMIF('${DM.cw}'!$A:$A,A${row},'${DM.cw}'!$D:$D))`);
     common.getRange(row, 7).setFormula(
       `=IF(A${row}="","",IF(AND(E${row}>=55,F${row}>=24),"S",IF(AND(E${row}>=35,F${row}>=14),"A",IF(E${row}>=17,"B","Допса"))))`
     );
   }
   SpreadsheetApp.flush();
-  refreshRanking();
+  refreshRanking_(central);
+  refreshPlusTotals_(central);
 }
 
-function syncActiveStudents() {
-  syncVisibility_();
-  refreshRanking();
-}
-
-function syncTable() {
-  syncVisibility_();
-  refreshTotals();
-  SpreadsheetApp.getActive().toast('Таблица синхронизирована.');
-}
-
-function syncGroupAssignments() {
-  const lock = LockService.getDocumentLock();
-  lock.waitLock(30000);
-  try {
-    const ss = SpreadsheetApp.getActive();
-    const common = ss.getSheetByName(DM.common);
-    const rosterRows = common.getRange(DM.commonFirstRow, 1, 90, 4).getDisplayValues();
-    const groups = [[], [], []];
-    rosterRows.forEach(row => {
-      const practitionerNo = DM.practitioners.indexOf(String(row[1]).trim());
-      const name = String(row[0]).trim();
-      if (practitionerNo >= 0 && name) groups[practitionerNo].push({ name, tg: row[2] });
-    });
-
-    const snapshots = collectPlusData_();
-    DM.plusSheets.forEach((sheetName, practitionerIndex) => {
-      const sheet = ss.getSheetByName(sheetName);
-      for (let practiceNo = 1; practiceNo <= DM.practiceCount; practiceNo++) {
-        const blockStart = 4 + (practiceNo - 1) * DM.blockSize;
-        const plusFirst = blockStart + 2;
-        sheet.getRange(plusFirst, 1, DM.studentsPerGroup, 2).clearContent();
-        sheet.getRange(plusFirst, DM.taskFirstCol, DM.studentsPerGroup, 30).clearContent();
-
-        groups[practitionerIndex].slice(0, DM.studentsPerGroup).forEach((student, offset) => {
-          const plusRow = plusFirst + offset;
-          const saved = snapshots[student.name] || {};
-          sheet.getRange(plusRow, 1, 1, 2).setValues([[student.name, student.tg]]);
-          if (saved.plus && saved.plus[practiceNo]) sheet.getRange(plusRow, DM.taskFirstCol, 1, 30).setValues([saved.plus[practiceNo]]);
-        });
-      }
-    });
-    syncVisibility_();
-    refreshTotals();
-  } finally {
-    lock.releaseLock();
-  }
-}
-
-function collectPlusData_() {
-  const ss = SpreadsheetApp.getActive();
-  const snapshots = {};
-  DM.plusSheets.forEach(sheetName => {
-    const sheet = ss.getSheetByName(sheetName);
-    for (let practiceNo = 1; practiceNo <= DM.practiceCount; practiceNo++) {
-      const blockStart = 4 + (practiceNo - 1) * DM.blockSize;
-      const plusFirst = blockStart + 2;
-      const plusRows = sheet.getRange(plusFirst, 1, DM.studentsPerGroup, 35).getValues();
-      plusRows.forEach(row => {
-        const name = String(row[0] == null ? '' : row[0]).trim();
-        if (!name) return;
-        snapshots[name] = snapshots[name] || { plus: {} };
-        snapshots[name].plus[practiceNo] = row.slice(5, 35);
-      });
-    }
-  });
-  return snapshots;
-}
-
-function syncVisibility_() {
-  const ss = SpreadsheetApp.getActive();
-  const commonRows = ss.getSheetByName(DM.common).getRange(DM.commonFirstRow, 1, 90, 4).getDisplayValues();
-  const activeByName = {};
-  commonRows.forEach(row => { if (row[0]) activeByName[String(row[0]).trim()] = isActiveValue_(row[3]); });
-
-  DM.plusSheets.forEach(sheetName => {
-    const sheet = ss.getSheetByName(sheetName);
-    for (let practiceNo = 1; practiceNo <= DM.practiceCount; practiceNo++) {
-      const blockStart = 4 + (practiceNo - 1) * DM.blockSize;
-      const plusFirst = blockStart + 2;
-      const names = sheet.getRange(plusFirst, 1, DM.studentsPerGroup, 1).getDisplayValues();
-      names.forEach((entry, offset) => {
-        const active = entry[0] === '' || activeByName[String(entry[0]).trim()] !== false;
-        if (active) {
-          sheet.showRows(plusFirst + offset);
-        } else {
-          sheet.hideRows(plusFirst + offset);
-        }
-      });
-    }
-  });
-}
-
-function refreshRanking() {
-  const ss = SpreadsheetApp.getActive();
-  const common = ss.getSheetByName(DM.common);
-  const ranking = ss.getSheetByName(DM.ranking);
-  if (!ranking) return;
+function refreshRanking_(central) {
+  const common = central.getSheetByName(DM.common);
+  const ranking = central.getSheetByName(DM.ranking);
   const rows = common.getRange(DM.commonFirstRow, 1, 90, 7).getDisplayValues()
     .filter(row => String(row[0]).trim() && isActiveValue_(row[3]))
     .map(row => [row[0], row[1], row[2], row[4], row[5], row[6]]);
@@ -395,60 +283,159 @@ function refreshRanking() {
   if (rows.length) ranking.getRange(4, 1, rows.length, 6).setValues(rows);
 }
 
-function setupValidations_() {
-  const ss = SpreadsheetApp.getActive();
-  const list = values => SpreadsheetApp.newDataValidation()
-    .requireValueInList(values, true).setAllowInvalid(false).build();
+function syncGroups_() {
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const central = SpreadsheetApp.openById(getCentralId_());
+    const commonRows = central.getSheetByName(DM.common).getRange(DM.commonFirstRow, 1, 90, 4).getDisplayValues();
+    const groups = [[], [], []];
+    commonRows.forEach(row => {
+      const practitionerNo = DM.practitioners.indexOf(String(row[1]).trim());
+      const name = String(row[0]).trim();
+      if (practitionerNo >= 0 && name) groups[practitionerNo].push({ name, tg: row[2] });
+    });
+    syncCwRoster_(central);
+    const snapshots = collectSnapshots_();
 
-  DM.plusSheets.forEach(name => {
-    const sheet = ss.getSheetByName(name);
-    for (let p = 1; p <= DM.practiceCount; p++) {
-      const blockStart = 4 + (p - 1) * DM.blockSize;
-      const plusFirst = blockStart + 2;
-      sheet.getRange(plusFirst, DM.taskFirstCol, DM.studentsPerGroup, 30)
-        .setNumberFormat('@').clearDataValidations();
-    }
-  });
-  ss.getSheetByName(DM.common).getRange('B4:B93')
-    .setDataValidation(list(DM.practitioners));
-  ss.getSheetByName(DM.common).getRange('D4:D93')
-    .setDataValidation(list(['Да', 'Нет']));
+    DM.practitioners.forEach((practitioner, index) => {
+      const fileId = DM.plusFileIds[practitioner];
+      if (!fileId) return;
+      const file = SpreadsheetApp.openById(fileId);
+      for (let practice = 1; practice <= DM.practiceCount; practice++) {
+        const sheet = getPlusSheet_(file, practice);
+        if (!sheet) continue;
+        const first = DM.plusFirstRow;
+        sheet.getRange(first, 1, DM.studentsPerGroup, 2).clearContent();
+        sheet.getRange(first, DM.taskFirstCol, DM.studentsPerGroup, 30).clearContent();
+        groups[index].slice(0, DM.studentsPerGroup).forEach((student, offset) => {
+          const row = first + offset;
+          sheet.getRange(row, 1, 1, 2).setValues([[student.name, student.tg]]);
+          if (snapshots[student.name] && snapshots[student.name][practice]) {
+            sheet.getRange(row, DM.taskFirstCol, 1, 30).setValues([snapshots[student.name][practice]]);
+          }
+        });
+      }
+    });
+    syncVisibility_();
+    refreshCentral_();
+  } finally {
+    lock.releaseLock();
+  }
 }
 
-function applyConditionalFormatting_() {
-  const ss = SpreadsheetApp.getActive();
-  DM.plusSheets.forEach(name => {
-    const sheet = ss.getSheetByName(name);
-    let rules = sheet.getConditionalFormatRules().filter(rule => !rule.getRanges().some(r => r.getColumn() >= DM.taskFirstCol && r.getColumn() <= DM.taskLastCol));
-    for (let p = 1; p <= DM.practiceCount; p++) {
-      const blockStart = 4 + (p - 1) * DM.blockSize;
-      const plusRange = sheet.getRange(blockStart + 2, DM.taskFirstCol, DM.studentsPerGroup, 30);
-      rules.push(SpreadsheetApp.newConditionalFormatRule().setRanges([plusRange]).whenTextEqualTo('+').setBackground('#C6E0B4').setFontColor('#000000').build());
-      rules.push(SpreadsheetApp.newConditionalFormatRule().setRanges([plusRange]).whenTextEqualTo('1').setBackground('#548235').setFontColor('#FFFFFF').build());
-      rules.push(SpreadsheetApp.newConditionalFormatRule().setRanges([plusRange]).whenTextEqualTo('-').setBackground('#C00000').setFontColor('#FFFFFF').build());
-    }
-    sheet.setConditionalFormatRules(rules);
+function syncCwRoster_(central) {
+  const commonRows = central.getSheetByName(DM.common).getRange(DM.commonFirstRow, 1, 90, 3).getDisplayValues();
+  const cw = central.getSheetByName(DM.cw);
+  // В шаблоне два блока по 90 студентов: первый начинается с 4-й строки, второй — с 98-й.
+  [4, 98].forEach(firstRow => {
+    commonRows.forEach((row, offset) => {
+      const target = firstRow + offset;
+      cw.getRange(target, 1).setValue(row[0]);
+      cw.getRange(target, 3).setValue(row[2]);
+    });
   });
 }
 
-function findStudentRow_(sheet, studentName, firstRow, lastRow) {
-  const values = sheet.getRange(firstRow, 1, lastRow - firstRow + 1, 1).getDisplayValues();
-  for (let i = 0; i < values.length; i++) if (String(values[i][0]).trim() === studentName) return firstRow + i;
+function collectSnapshots_() {
+  const snapshots = {};
+  DM.practitioners.forEach(practitioner => {
+    const fileId = DM.plusFileIds[practitioner];
+    if (!fileId) return;
+    const file = SpreadsheetApp.openById(fileId);
+    for (let practice = 1; practice <= DM.practiceCount; practice++) {
+      const sheet = getPlusSheet_(file, practice);
+      if (!sheet) continue;
+      const first = DM.plusFirstRow;
+      const rows = sheet.getRange(first, 1, DM.studentsPerGroup, 35).getValues();
+      rows.forEach(row => {
+        const name = String(row[0] == null ? '' : row[0]).trim();
+        if (!name) return;
+        snapshots[name] = snapshots[name] || {};
+        snapshots[name][practice] = row.slice(5, 35);
+      });
+    }
+  });
+  return snapshots;
+}
+
+function syncVisibility_() {
+  const central = SpreadsheetApp.openById(getCentralId_());
+  const rows = central.getSheetByName(DM.common).getRange(DM.commonFirstRow, 1, 90, 4).getDisplayValues();
+  const active = {};
+  rows.forEach(row => { if (row[0]) active[String(row[0]).trim()] = isActiveValue_(row[3]); });
+  DM.practitioners.forEach(practitioner => {
+    const fileId = DM.plusFileIds[practitioner];
+    if (!fileId) return;
+    const file = SpreadsheetApp.openById(fileId);
+    for (let practice = 1; practice <= DM.practiceCount; practice++) {
+      const sheet = getPlusSheet_(file, practice);
+      if (!sheet) continue;
+      const first = DM.plusFirstRow;
+      const names = sheet.getRange(first, 1, DM.studentsPerGroup, 1).getDisplayValues();
+      names.forEach((entry, offset) => {
+        const show = entry[0] === '' || active[String(entry[0]).trim()] !== false;
+        if (show) sheet.showRows(first + offset);
+        else sheet.hideRows(first + offset);
+      });
+    }
+  });
+}
+
+function refreshPlusTotals_(central) {
+  const logs = central.getSheetByName(DM.logs);
+  const lastRow = findLastLogRow_(logs);
+  const totals = {};
+  if (lastRow >= DM.logFirstRow) {
+    logs.getRange(DM.logFirstRow, 1, lastRow - DM.logFirstRow + 1, 9).getDisplayValues().forEach(row => {
+      const student = String(row[0]).trim();
+      const practice = Number(row[2]);
+      const points = toNumber_(row[7]);
+      if (student && practice && points) totals[student + '|' + practice] = (totals[student + '|' + practice] || 0) + points;
+    });
+  }
+  DM.practitioners.forEach(practitioner => {
+    const fileId = DM.plusFileIds[practitioner];
+    if (!fileId) return;
+    const file = SpreadsheetApp.openById(fileId);
+    for (let practice = 1; practice <= DM.practiceCount; practice++) {
+      const sheet = getPlusSheet_(file, practice);
+      if (!sheet) continue;
+      const first = DM.plusFirstRow;
+      const names = sheet.getRange(first, 1, DM.studentsPerGroup, 1).getDisplayValues();
+      const values = names.map(row => [row[0] ? (totals[row[0].trim() + '|' + practice] || 0) : '']);
+      sheet.getRange(first, 5, DM.studentsPerGroup, 1).setValues(values);
+    }
+  });
+}
+
+function practiceFromSheet_(sheet) {
+  const match = String(sheet.getName()).match(/^Практика\s+(\d+)$/i);
+  if (!match) return 0;
+  const practice = Number(match[1]);
+  return practice >= 1 && practice <= DM.practiceCount ? practice : 0;
+}
+
+function getPlusSheet_(file, practice) {
+  return file.getSheetByName(`Практика ${practice}`);
+}
+
+function findStudentRow_(sheet, name, first, last) {
+  const values = sheet.getRange(first, 1, last - first + 1, 1).getDisplayValues();
+  for (let i = 0; i < values.length; i++) if (String(values[i][0]).trim() === name) return first + i;
   return 0;
 }
 
 function findLastLogRow_(sheet) {
   const values = sheet.getRange(DM.logFirstRow, 1, DM.logMaxRow - DM.logFirstRow + 1, 1).getDisplayValues();
   let last = DM.logFirstRow - 1;
-  values.forEach((row, i) => { if (String(row[0]).trim()) last = DM.logFirstRow + i; });
+  values.forEach((row, index) => { if (String(row[0]).trim()) last = DM.logFirstRow + index; });
   return last;
 }
 
-function isStudentActive_(practitionerNo, studentName) {
-  const common = SpreadsheetApp.getActive().getSheetByName(DM.common);
-  const values = common.getRange(DM.commonFirstRow, 1, 90, 4).getDisplayValues();
-  return values.some(row => DM.practitioners[practitionerNo - 1] === String(row[1]).trim() &&
-    String(row[0]).trim() === studentName && isActiveValue_(row[3]));
+function isStudentActive_(central, practitioner, student) {
+  const rows = central.getSheetByName(DM.common).getRange(DM.commonFirstRow, 1, 90, 4).getDisplayValues();
+  return rows.some(row => String(row[0]).trim() === student && String(row[1]).trim() === practitioner && isActiveValue_(row[3]));
 }
 
 function isActiveValue_(value) {
@@ -456,10 +443,22 @@ function isActiveValue_(value) {
   return !text || (text !== 'нет' && text !== 'no' && text !== 'n');
 }
 
-function isPractitionerEditor_() {
-  if (!DM.practitionerEmails.length) return true;
-  const email = Session.getActiveUser().getEmail();
-  return !!email && DM.practitionerEmails.indexOf(email.toLowerCase()) !== -1;
+function getCentralId_() {
+  return DM.centralFileId || SpreadsheetApp.getActive().getId();
+}
+
+function validateConfig_() {
+  const missing = [];
+  if (!DM.centralFileId) missing.push('centralFileId');
+  DM.practitioners.forEach(name => {
+    if (!DM.plusFileIds[name]) missing.push(`plusFileIds[${name}]`);
+  });
+  if (missing.length) {
+    throw new Error(
+      'Заполните ID четырёх сконвертированных Google-таблиц в начале Code.gs: ' +
+      missing.join(', ')
+    );
+  }
 }
 
 function ladderPoints_(exitNo) {
@@ -481,6 +480,6 @@ function tasksEqual_(left, right) {
 }
 
 function toNumber_(value) {
-  const number = Number(String(value == null ? '' : value).replace(',', '.'));
-  return isNaN(number) ? 0 : number;
+  const n = Number(String(value == null ? '' : value).replace(',', '.'));
+  return isNaN(n) ? 0 : n;
 }
