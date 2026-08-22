@@ -1,10 +1,10 @@
 const DM = {
   // Вставьте ID четырёх Google-таблиц. ID находится между /d/ и /edit в URL.
-  centralFileId: '1RIDAw8VWB76L6E2RDaiSiyj9UlLk0c0P-rfs3WivcFM',
+  centralFileId: '',
   plusFileIds: {
     'Артём': '',
-    'Рами': '1WG-5ZdLOjKTiy9hG-muEugFT16jjxcCQMi3_N46rA3c',
-    'Немат': '1SnTIZRF7mJByn0WEZyC1zooNE3y1gG7r2TXWos1HW_o'
+    'Рами': '',
+    'Немат': ''
   },
   practitioners: ['Артём', 'Рами', 'Немат'],
   common: 'Общий',
