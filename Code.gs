@@ -79,7 +79,7 @@ function handleCentralEdit_(event) {
       syncGroups_();
       return;
     }
-    if (col === 8 || col === 9) {
+    if (col === 10 || col === 11) {
       refreshCentral_();
       return;
     }
@@ -277,7 +277,7 @@ function syncTable() {
   SpreadsheetApp.getActive().toast('Центральная таблица синхронизирована.');
 }
 
-function refreshCentral_() {
+function refreshCentral_legacy() {
   const central = SpreadsheetApp.openById(getCentralId_());
   SpreadsheetApp.flush();
   refreshLogCoefficients_(central);
@@ -300,17 +300,52 @@ function refreshCentral_() {
   refreshPlusTotals_(central);
 }
 
+function krStatusFormula_(row, firstRow, lastRow) {
+  const parts = ['E', 'F', 'G', 'H', 'I'].map(col =>
+    `COUNTIFS('${DM.cw}'!$A$${firstRow}:$A$${lastRow},A${row},'${DM.cw}'!$${col}$${firstRow}:$${col}$${lastRow},">=3")`
+  );
+  return `=IF(A${row}="","",IF(${parts.join('+')}>=4,"зачет","незачет"))`;
+}
+
+function refreshCentral_() {
+  const central = SpreadsheetApp.openById(getCentralId_());
+  SpreadsheetApp.flush();
+  refreshLogCoefficients_(central);
+  SpreadsheetApp.flush();
+  const common = central.getSheetByName(DM.common);
+  for (let row = DM.commonFirstRow; row <= DM.commonLastRow; row++) {
+    common.getRange(row, 5).setFormula(
+      `=IF(A${row}="","",SUMIF('${DM.logs}'!$A$${DM.logFirstRow}:$A$${DM.logMaxRow},A${row},'${DM.logs}'!$H$${DM.logFirstRow}:$H$${DM.logMaxRow}))`
+    );
+    common.getRange(row, 6).setFormula(`=IF(A${row}="","",SUMIF('${DM.cw}'!$A:$A,A${row},'${DM.cw}'!$D:$D))`);
+    common.getRange(row, 7).setFormula(krStatusFormula_(row, 3, 92));
+    common.getRange(row, 8).setFormula(krStatusFormula_(row, 96, 185));
+    common.getRange(row, 9).setFormula(
+      `=IF(A${row}="","",IF(AND(E${row}+IF(K${row}="",0,K${row})>=55,F${row}+IF(J${row}="",0,J${row})>=24),"S",IF(AND(E${row}+IF(K${row}="",0,K${row})>=35,F${row}+IF(J${row}="",0,J${row})>=14),"A",IF(E${row}+IF(K${row}="",0,K${row})>=17,"B","Допса"))))`
+    );
+    common.getRange(row, 13).setFormula(
+      `=IF(OR(A${row}="",L${row}=""),"",IF(I${row}="B",IF(L${row}="неуд","2F",IF(L${row}="уд","3E",IF(L${row}="хорошо","3D","3D/4C"))),IF(I${row}="A",IF(L${row}="неуд","2F",IF(L${row}="уд","3D",IF(L${row}="хорошо","4C","4B/5A"))),IF(I${row}="S",IF(L${row}="неуд","2F",IF(L${row}="уд","3D",IF(L${row}="хорошо","4B/5A","5A")),""))))`
+    );
+  }
+  SpreadsheetApp.flush();
+  refreshRanking_(central);
+  refreshPlusTotals_(central);
+}
+
 function refreshRanking_(central) {
   const common = central.getSheetByName(DM.common);
   const ranking = central.getSheetByName(DM.ranking);
-  const rows = common.getRange(DM.commonFirstRow, 1, 90, 7).getDisplayValues()
+  const rows = common.getRange(DM.commonFirstRow, 1, 90, 9).getDisplayValues()
     .filter(row => String(row[0]).trim() && isActiveValue_(row[3]))
-    .map(row => [row[0], row[1], row[4], row[5], row[6]]);
+    .map(row => [row[0], row[1], row[4], row[5], row[8]]);
+  const tierOrder = { 'S': 0, 'A': 1, 'B': 2, 'Допса': 3 };
   rows.sort((a, b) => {
-    const d = toNumber_(b[3]) - toNumber_(a[3]);
-    if (d) return d;
-    const cw = toNumber_(b[4]) - toNumber_(a[4]);
-    if (cw) return cw;
+    const tierA = tierOrder[a[4]] === undefined ? 99 : tierOrder[a[4]];
+    const tierB = tierOrder[b[4]] === undefined ? 99 : tierOrder[b[4]];
+    const tier = tierA - tierB;
+    if (tier) return tier;
+    const total = (toNumber_(b[2]) + toNumber_(b[3])) - (toNumber_(a[2]) + toNumber_(a[3]));
+    if (total) return total;
     return String(a[0]).localeCompare(String(b[0]));
   });
   ranking.getRange(4, 1, 90, 8).clearContent();
