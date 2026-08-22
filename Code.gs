@@ -15,8 +15,10 @@ const DM = {
   studentsPerGroup: 30,
   plusHeaderRow: 3,
   plusFirstRow: 4,
-  taskFirstCol: 6,
-  taskLastCol: 35,
+  plusCoefficientCol: 3,
+  plusTotalCol: 4,
+  taskFirstCol: 5,
+  taskLastCol: 34,
   commonFirstRow: 4,
   commonLastRow: 93,
   logFirstRow: 4,
@@ -90,6 +92,7 @@ function handlePlusEdit_(event, practitioner) {
   const row = cell.getRow();
   const col = cell.getColumn();
   if (col < DM.taskFirstCol || col > DM.taskLastCol) return;
+  cell.clearNote();
 
   const practiceNo = practiceFromSheet_(sheet);
   if (!practiceNo) return;
@@ -118,7 +121,6 @@ function handlePlusEdit_(event, practitioner) {
         event.source.toast(result.message);
         return;
       }
-      cell.setNote(result.message);
     }
     refreshCentral_();
     return;
@@ -127,7 +129,6 @@ function handlePlusEdit_(event, practitioner) {
   if (value === '-') {
     removeLogRecord_(central, practitioner, practiceNo, studentName, taskName, false);
     if (oldValue !== '-') appendPenaltyLog_(central, practitioner, practiceNo, studentName, taskName);
-    cell.setNote('Штраф -2 балла без коэффициента.');
     refreshCentral_();
     return;
   }
@@ -169,7 +170,7 @@ function appendNormalLog_(central, plusFile, plusSheet, practitionerNo,
   const plusFirst = DM.plusFirstRow;
   const studentRow = findStudentRow_(plusSheet, studentName, plusFirst, plusFirst + DM.studentsPerGroup - 1);
   if (!studentRow) return { ok: false, message: 'Студент не найден в файле практика.' };
-  const coefficient = Number(plusSheet.getRange(studentRow, 4).getValue()) || 0.5;
+  const coefficient = Number(plusSheet.getRange(studentRow, DM.plusCoefficientCol).getValue()) || 0.5;
   const exitNo = studentExit + 1;
   const base = ladderPoints_(exitNo);
   const newRow = Math.max(findLastLogRow_(logs) + 1, DM.logFirstRow);
@@ -246,6 +247,7 @@ function hasStatusLog_(central, student, practitioner, status) {
 function syncTable() {
   validateConfig_();
   syncGroups_();
+  clearPlusNotes_();
   SpreadsheetApp.getActive().toast('Центральная таблица синхронизирована.');
 }
 
@@ -271,7 +273,7 @@ function refreshRanking_(central) {
   const ranking = central.getSheetByName(DM.ranking);
   const rows = common.getRange(DM.commonFirstRow, 1, 90, 7).getDisplayValues()
     .filter(row => String(row[0]).trim() && isActiveValue_(row[3]))
-    .map(row => [row[0], row[1], row[2], row[4], row[5], row[6]]);
+    .map(row => [row[0], row[1], row[4], row[5], row[6]]);
   rows.sort((a, b) => {
     const d = toNumber_(b[3]) - toNumber_(a[3]);
     if (d) return d;
@@ -279,8 +281,8 @@ function refreshRanking_(central) {
     if (cw) return cw;
     return String(a[0]).localeCompare(String(b[0]));
   });
-  ranking.getRange(4, 1, 90, 9).clearContent();
-  if (rows.length) ranking.getRange(4, 1, rows.length, 6).setValues(rows);
+  ranking.getRange(4, 1, 90, 8).clearContent();
+  if (rows.length) ranking.getRange(4, 1, rows.length, 5).setValues(rows);
 }
 
 function syncGroups_() {
@@ -306,17 +308,24 @@ function syncGroups_() {
         const sheet = getPlusSheet_(file, practice);
         if (!sheet) continue;
         const first = DM.plusFirstRow;
-        sheet.getRange(first, 1, DM.studentsPerGroup, 2).clearContent();
+        sheet.getRange(first, 1, DM.studentsPerGroup, 1).clearContent();
         sheet.getRange(first, DM.taskFirstCol, DM.studentsPerGroup, 30).clearContent();
         groups[index].slice(0, DM.studentsPerGroup).forEach((student, offset) => {
           const row = first + offset;
-          sheet.getRange(row, 1, 1, 2).setValues([[student.name, student.tg]]);
-          if (snapshots[student.name] && snapshots[student.name][practice]) {
-            sheet.getRange(row, DM.taskFirstCol, 1, 30).setValues([snapshots[student.name][practice]]);
+          sheet.getRange(row, 1).setValue(student.name);
+          const saved = snapshots.byName[student.name] && snapshots.byName[student.name][practice]
+            ? snapshots.byName[student.name][practice]
+            : snapshots.bySlot[practitioner] && snapshots.bySlot[practitioner][practice]
+              ? snapshots.bySlot[practitioner][practice][offset]
+              : null;
+          if (saved) {
+            sheet.getRange(row, DM.taskFirstCol, 1, 30).setValues([saved]);
           }
         });
       }
     });
+    clearPlusNotes_();
+    reconcilePlusResults_(central);
     syncVisibility_();
     refreshCentral_();
   } finally {
@@ -325,20 +334,30 @@ function syncGroups_() {
 }
 
 function syncCwRoster_(central) {
-  const commonRows = central.getSheetByName(DM.common).getRange(DM.commonFirstRow, 1, 90, 3).getDisplayValues();
+  const commonRows = central.getSheetByName(DM.common).getRange(DM.commonFirstRow, 1, 90, 2).getDisplayValues();
   const cw = central.getSheetByName(DM.cw);
-  // В шаблоне два блока по 90 студентов: первый начинается с 4-й строки, второй — с 98-й.
-  [4, 98].forEach(firstRow => {
+  const saved = {};
+  [2, 94].forEach(firstRow => {
+    cw.getRange(firstRow, 1, 90, 9).getValues().forEach(row => {
+      const name = String(row[0] == null ? '' : row[0]).trim();
+      if (!name) return;
+      saved[name] = { attempt: row[2], scores: row.slice(4, 9) };
+    });
+  });
+  // Два блока по 90 студентов: шапки находятся в строках 1 и 93.
+  [2, 94].forEach(firstRow => {
     commonRows.forEach((row, offset) => {
       const target = firstRow + offset;
-      cw.getRange(target, 1).setValue(row[0]);
-      cw.getRange(target, 3).setValue(row[2]);
+      const previous = saved[String(row[0]).trim()];
+      cw.getRange(target, 1, 1, 2).setValues([[row[0], row[1]]]);
+      cw.getRange(target, 3).setValue(previous ? previous.attempt : '');
+      cw.getRange(target, 5, 1, 5).setValues([previous ? previous.scores : ['', '', '', '', '']]);
     });
   });
 }
 
 function collectSnapshots_() {
-  const snapshots = {};
+  const snapshots = { byName: {}, bySlot: {} };
   DM.practitioners.forEach(practitioner => {
     const fileId = DM.plusFileIds[practitioner];
     if (!fileId) return;
@@ -347,12 +366,15 @@ function collectSnapshots_() {
       const sheet = getPlusSheet_(file, practice);
       if (!sheet) continue;
       const first = DM.plusFirstRow;
-      const rows = sheet.getRange(first, 1, DM.studentsPerGroup, 35).getValues();
+      const rows = sheet.getRange(first, 1, DM.studentsPerGroup, 34).getValues();
+      snapshots.bySlot[practitioner] = snapshots.bySlot[practitioner] || {};
+      snapshots.bySlot[practitioner][practice] = [];
       rows.forEach(row => {
         const name = String(row[0] == null ? '' : row[0]).trim();
+        snapshots.bySlot[practitioner][practice].push(row.slice(4, 34));
         if (!name) return;
-        snapshots[name] = snapshots[name] || {};
-        snapshots[name][practice] = row.slice(5, 35);
+        snapshots.byName[name] = snapshots.byName[name] || {};
+        snapshots.byName[name][practice] = row.slice(4, 34);
       });
     }
   });
@@ -404,7 +426,80 @@ function refreshPlusTotals_(central) {
       const first = DM.plusFirstRow;
       const names = sheet.getRange(first, 1, DM.studentsPerGroup, 1).getDisplayValues();
       const values = names.map(row => [row[0] ? (totals[row[0].trim() + '|' + practice] || 0) : '']);
-      sheet.getRange(first, 5, DM.studentsPerGroup, 1).setValues(values);
+      sheet.getRange(first, DM.plusTotalCol, DM.studentsPerGroup, 1).setValues(values);
+    }
+  });
+}
+
+function clearPlusNotes_() {
+  DM.practitioners.forEach(practitioner => {
+    const fileId = DM.plusFileIds[practitioner];
+    if (!fileId) return;
+    const file = SpreadsheetApp.openById(fileId);
+    for (let practice = 1; practice <= DM.practiceCount; practice++) {
+      const sheet = getPlusSheet_(file, practice);
+      if (!sheet) continue;
+      sheet.getRange(DM.plusFirstRow, DM.taskFirstCol,
+        DM.studentsPerGroup, DM.taskLastCol - DM.taskFirstCol + 1).clearNote();
+    }
+  });
+}
+
+function reconcilePlusResults_(central) {
+  const logs = central.getSheetByName(DM.logs);
+  const lastRow = findLastLogRow_(logs);
+  const normal = {};
+  const penalties = {};
+  if (lastRow >= DM.logFirstRow) {
+    logs.getRange(DM.logFirstRow, 1, lastRow - DM.logFirstRow + 1, 9)
+      .getDisplayValues().forEach(row => {
+        const key = [row[0], row[1], row[2], row[3]].map(value => String(value).trim()).join('|');
+        const isPenalty = String(row[5]).trim() === '' && String(row[6]).trim() === '' && Number(row[7]) === -2;
+        if (isPenalty) penalties[key] = true;
+        else if (row[0] && row[1] && row[2] && row[3]) normal[key] = true;
+      });
+  }
+
+  DM.practitioners.forEach((practitioner, practitionerIndex) => {
+    const fileId = DM.plusFileIds[practitioner];
+    if (!fileId) return;
+    const file = SpreadsheetApp.openById(fileId);
+    for (let practice = 1; practice <= DM.practiceCount; practice++) {
+      const sheet = getPlusSheet_(file, practice);
+      if (!sheet) continue;
+      const headers = sheet.getRange(DM.plusHeaderRow, DM.taskFirstCol, 1,
+        DM.taskLastCol - DM.taskFirstCol + 1).getDisplayValues()[0];
+      const rows = sheet.getRange(DM.plusFirstRow, 1, DM.studentsPerGroup,
+        DM.taskLastCol).getDisplayValues();
+      rows.forEach(row => {
+        const student = String(row[0]).trim();
+        if (!student) return;
+        headers.forEach((task, offset) => {
+          const value = String(row[DM.taskFirstCol - 1 + offset]).trim();
+          if (value !== '1' && value !== '-') return;
+          const key = [student, practitioner, practice, task].join('|');
+          if (value === '1') {
+            if (penalties[key]) {
+              removeLogRecord_(central, practitioner, practice, student, task, false);
+              delete penalties[key];
+            }
+            if (!normal[key]) {
+              const result = appendNormalLog_(central, file, sheet, practitionerIndex + 1,
+                practitioner, practice, student, task);
+              if (result.ok) normal[key] = true;
+            }
+          } else {
+            if (normal[key]) {
+              removeLogRecord_(central, practitioner, practice, student, task, false);
+              delete normal[key];
+            }
+            if (!penalties[key]) {
+              appendPenaltyLog_(central, practitioner, practice, student, task);
+              penalties[key] = true;
+            }
+          }
+        });
+      });
     }
   });
 }
