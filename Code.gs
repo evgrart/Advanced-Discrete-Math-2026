@@ -23,14 +23,18 @@ function onOpen() {
     .createMenu('DM система')
     .addItem('Установить проверки и цвета', 'installDmSystem')
     .addItem('Синхронизировать группы', 'syncGroupAssignments')
-    .addItem('Синхронизировать активность', 'syncActiveStudents')
-    .addItem('Пересчитать D, CW и тиры', 'refreshTotals')
+    .addItem('Синхронизировать таблицу', 'syncTable')
     .addToUi();
 }
 
 function installDmSystem() {
   setupValidations_();
   applyConditionalFormatting_();
+  const ranking = SpreadsheetApp.getActive().getSheetByName(DM.ranking);
+  if (ranking) {
+    ranking.getRange(3, 1, 1, 9).clearContent();
+    ranking.getRange(3, 1, 1, 6).setValues([['ФИО', 'Практик', 'TG', 'D', 'CW', 'Тир']]);
+  }
   syncGroupAssignments();
   refreshTotals();
   SpreadsheetApp.getActive().toast('Проверки, цвета, группы и расчёты обновлены.');
@@ -281,6 +285,13 @@ function refreshTotals() {
 
 function syncActiveStudents() {
   syncVisibility_();
+  refreshRanking();
+}
+
+function syncTable() {
+  syncVisibility_();
+  refreshTotals();
+  SpreadsheetApp.getActive().toast('Таблица синхронизирована.');
 }
 
 function syncGroupAssignments() {
@@ -371,16 +382,17 @@ function refreshRanking() {
   const ranking = ss.getSheetByName(DM.ranking);
   if (!ranking) return;
   const rows = common.getRange(DM.commonFirstRow, 1, 90, 7).getDisplayValues()
-    .filter(row => String(row[0]).trim());
+    .filter(row => String(row[0]).trim() && isActiveValue_(row[3]))
+    .map(row => [row[0], row[1], row[2], row[4], row[5], row[6]]);
   rows.sort((a, b) => {
-    const d = toNumber_(b[4]) - toNumber_(a[4]);
+    const d = toNumber_(b[3]) - toNumber_(a[3]);
     if (d) return d;
-    const cw = toNumber_(b[5]) - toNumber_(a[5]);
+    const cw = toNumber_(b[4]) - toNumber_(a[4]);
     if (cw) return cw;
     return String(a[0]).localeCompare(String(b[0]));
   });
-  ranking.getRange(4, 1, 90, 7).clearContent();
-  if (rows.length) ranking.getRange(4, 1, rows.length, 7).setValues(rows);
+  ranking.getRange(4, 1, 90, 9).clearContent();
+  if (rows.length) ranking.getRange(4, 1, rows.length, 6).setValues(rows);
 }
 
 function setupValidations_() {
@@ -394,7 +406,7 @@ function setupValidations_() {
       const blockStart = 4 + (p - 1) * DM.blockSize;
       const plusFirst = blockStart + 2;
       sheet.getRange(plusFirst, DM.taskFirstCol, DM.studentsPerGroup, 30)
-        .setNumberFormat('@').setDataValidation(list(['+', '1', '-']));
+        .setNumberFormat('@').clearDataValidations();
     }
   });
   ss.getSheetByName(DM.common).getRange('B4:B93')

@@ -282,15 +282,15 @@ def build_ladder_sheet(ws):
 
 
 def build_ranking_sheet(ws):
-    title(ws, "Общий рейтинг", "", 7)
-    headers = ["ФИО", "Практик", "TG", "Прод", "D", "CW", "Тир"]
+    title(ws, "Общий рейтинг", "", 6)
+    headers = ["ФИО", "Практик", "TG", "D", "CW", "Тир"]
     for col, value in enumerate(headers, start=1):
         ws.cell(3, col, value)
-    header_style(ws, 3, 7)
-    body_style(ws, 4, 93, 1, 7)
+    header_style(ws, 3, 6)
+    body_style(ws, 4, 93, 1, 6)
     ws.freeze_panes = "A4"
     ws.sheet_view.showGridLines = False
-    for col, width in {"A": 27, "B": 12, "C": 22, "D": 10, "E": 10, "F": 10, "G": 12}.items():
+    for col, width in {"A": 27, "B": 12, "C": 22, "D": 10, "E": 10, "F": 12}.items():
         ws.column_dimensions[col].width = width
     ws.protection.sheet = False
 
@@ -336,7 +336,7 @@ def build_plus_sheet(ws, practitioner, roster, task_labels, task_values, result_
                 ws.cell(row, col).protection = Protection(locked=False)
                 ws.cell(row, col).number_format = "@"
         body_style(ws, plus_first, plus_last, 1, end_task_col)
-        add_validation(ws, f"F{plus_first}:AI{plus_last}", "+,1,-", "Для плюса в Google Sheets вводите '+; практик может поставить 1 или -")
+        # Выпадающего списка нет: студент вводит '+, практик — 1 или -.
         ws.conditional_formatting.add(f"C{plus_first}:C{plus_last}", CellIsRule(operator="greaterThanOrEqual", formula=["21"], fill=PatternFill("solid", fgColor=GREEN)))
         ws.conditional_formatting.add(f"C{plus_first}:C{plus_last}", CellIsRule(operator="between", formula=["15", "20"], fill=PatternFill("solid", fgColor="A9D18E")))
         ws.conditional_formatting.add(f"C{plus_first}:C{plus_last}", CellIsRule(operator="lessThan", formula=["15"], fill=PatternFill("solid", fgColor=LIGHT_GREEN)))
