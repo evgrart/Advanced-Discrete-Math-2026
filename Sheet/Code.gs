@@ -92,6 +92,26 @@ function handleCentralEdit_(event) {
   const central = event.source;
 
   if (sheet.getName() === DM.common && row >= DM.commonFirstRow && row <= DM.commonLastRow) {
+    if (col === 1) {
+      const oldName = String(event.oldValue || '').trim();
+      const newName = String(sheet.getRange(row, 1).getDisplayValue()).trim();
+      if (oldName && !newName) {
+        sheet.getRange(row, 1).setValue(oldName);
+        central.toast('ФИО нельзя очищать. Укажите новое имя студента.');
+        return;
+      }
+      if (oldName && newName && oldName !== newName) {
+        const practitioner = String(sheet.getRange(row, 2).getDisplayValue()).trim();
+        const result = renameStudentEverywhere_(central, oldName, newName, practitioner, row);
+        if (!result.ok) {
+          sheet.getRange(row, 1).setValue(oldName);
+          central.toast(result.message);
+          return;
+        }
+      }
+      syncGroups_();
+      return;
+    }
     if (col === 2) appendTransferLog_(central, row, event);
     if (col === 4) appendDepartureLog_(central, row);
     if (col >= 1 && col <= 4) {
@@ -116,14 +136,34 @@ function handlePlusEdit_(event, practitioner) {
   const row = cell.getRow();
   const col = cell.getColumn();
   const layout = plusLayout_(practitioner);
+  const plusFirst = DM.plusFirstRow;
+  const plusLast = plusFirst + DM.studentsPerGroup - 1;
+
+  if (col === 1 && row >= plusFirst && row <= plusLast) {
+    const oldName = String(event.oldValue || '').trim();
+    const newName = String(cell.getDisplayValue()).trim();
+    if (oldName && !newName) {
+      cell.setValue(oldName);
+      event.source.toast('ФИО нельзя очищать. Укажите новое имя студента.');
+      return;
+    }
+    if (!oldName || !newName || oldName === newName) return;
+    const central = SpreadsheetApp.openById(getCentralId_());
+    const result = renameStudentEverywhere_(central, oldName, newName, practitioner);
+    if (!result.ok) {
+      cell.setValue(oldName);
+      event.source.toast(result.message);
+      return;
+    }
+    syncGroups_();
+    return;
+  }
   if (col < layout.taskFirstCol || col > layout.taskLastCol) return;
   cell.clearNote();
 
   const practiceNo = practiceFromSheet_(sheet);
   if (!practiceNo) return;
   const plusHeader = DM.plusHeaderRow;
-  const plusFirst = DM.plusFirstRow;
-  const plusLast = plusFirst + DM.studentsPerGroup - 1;
   if (row < plusFirst || row > plusLast) return;
 
   const value = String(cell.getDisplayValue()).trim();
@@ -171,6 +211,63 @@ function handlePlusEdit_(event, practitioner) {
     }
     refreshCentral_();
   }
+}
+
+function renameStudentEverywhere_(central, oldName, newName, practitioner, knownRow) {
+  const common = central.getSheetByName(DM.common);
+  const commonRows = common.getRange(DM.commonFirstRow, 1, DM.commonLastRow - DM.commonFirstRow + 1, 2).getDisplayValues();
+  let sourceIndex = -1;
+  commonRows.forEach((row, index) => {
+    if (sourceIndex < 0 && String(row[0]).trim() === oldName &&
+        (!practitioner || String(row[1]).trim() === practitioner)) sourceIndex = index;
+  });
+  if (sourceIndex < 0 && knownRow >= DM.commonFirstRow && knownRow <= DM.commonLastRow) {
+    sourceIndex = knownRow - DM.commonFirstRow;
+  }
+  if (sourceIndex < 0) {
+    return { ok: false, message: 'Старое ФИО не найдено в центральной таблице.' };
+  }
+  const duplicate = commonRows.some((row, index) => index !== sourceIndex && String(row[0]).trim() === newName);
+  if (duplicate) {
+    return { ok: false, message: 'Студент с таким ФИО уже есть в центральной таблице.' };
+  }
+
+  common.getRange(DM.commonFirstRow + sourceIndex, 1).setValue(newName);
+
+  const logLastRow = findLastLogRow_(central.getSheetByName(DM.logs));
+  if (logLastRow >= DM.logFirstRow) {
+    const logs = central.getSheetByName(DM.logs);
+    const values = logs.getRange(DM.logFirstRow, 1, logLastRow - DM.logFirstRow + 1, 11).getValues();
+    let changed = false;
+    values.forEach(row => {
+      if (String(row[0]).trim() === oldName) {
+        row[0] = newName;
+        changed = true;
+      }
+    });
+    if (changed) logs.getRange(DM.logFirstRow, 1, values.length, 11).setValues(values);
+  }
+
+  DM.practitioners.forEach(name => {
+    const fileId = DM.plusFileIds[name];
+    if (!fileId) return;
+    const file = SpreadsheetApp.openById(fileId);
+    const localLogs = file.getSheetByName(DM.plusLogs);
+    if (!localLogs) return;
+    const lastRow = localLogs.getLastRow();
+    if (lastRow < 2) return;
+    const values = localLogs.getRange(2, 1, lastRow - 1, 5).getValues();
+    let changed = false;
+    values.forEach(row => {
+      if (String(row[0]).trim() === oldName) {
+        row[0] = newName;
+        changed = true;
+      }
+    });
+    if (changed) localLogs.getRange(2, 1, values.length, 5).setValues(values);
+  });
+
+  return { ok: true };
 }
 
 function appendNormalLog_(central, plusFile, plusSheet, practitionerNo,
