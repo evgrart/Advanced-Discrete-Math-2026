@@ -79,7 +79,7 @@ function handleCentralEdit_(event) {
       syncGroups_();
       return;
     }
-    if (col === 10 || col === 11) {
+    if (col === 10 || col === 11 || col === 12 || col === 13) {
       refreshCentral_();
       return;
     }
@@ -289,7 +289,7 @@ function refreshCentral_legacy() {
     );
     common.getRange(row, 6).setFormula(`=IF(A${row}="","",SUMIF('${DM.cw}'!$A:$A,A${row},'${DM.cw}'!$D:$D))`);
     common.getRange(row, 7).setFormula(
-      `=IF(A${row}="","",IF(AND(E${row}+IF(I${row}="",0,I${row})>=55,F${row}+IF(H${row}="",0,H${row})>=24),"S",IF(AND(E${row}+IF(I${row}="",0,I${row})>=35,F${row}+IF(H${row}="",0,H${row})>=14),"A",IF(E${row}+IF(I${row}="",0,I${row})>=17,"B","Допса"))))`
+      `=IF(A${row}="","",IF(AND(E${row}+IF(I${row}="",0,I${row})>=55,F${row}+IF(H${row}="",0,H${row})>=24),"S",IF(AND(E${row}+IF(I${row}="",0,I${row})>=35,F${row}+IF(H${row}="",0,H${row})>=14),"A",IF(E${row}+IF(I${row}="",0,I${row})>=17,"B","F"))))`
     );
     common.getRange(row, 11).setFormula(
       `=IF(OR(A${row}="",J${row}=""),"",IF(G${row}="B",IF(J${row}="неуд","2F",IF(J${row}="уд","3E",IF(J${row}="хорошо","3D","3D/4C"))),IF(G${row}="A",IF(J${row}="неуд","2F",IF(J${row}="уд","3D",IF(J${row}="хорошо","4C","4B/5A"))),IF(G${row}="S",IF(J${row}="неуд","2F",IF(J${row}="уд","3D",IF(J${row}="хорошо","4B/5A","5A"))),""))))`
@@ -307,6 +307,10 @@ function krStatusFormula_(row, firstRow, lastRow) {
   return `=IF(A${row}="","",IF(${parts.join('+')}>=4,"зачет","незачет"))`;
 }
 
+function finalGradeFormula_(row) {
+  return `=IF(A${row}="","",IF(AND(G${row}="зачет",H${row}="зачет"),IF(I${row}="F","2F",IF(L${row}="","",SWITCH(I${row}&"|"&L${row},"B|неуд","2F","B|уд","3E","B|хорошо","3D","B|очень хорошо",IF(M${row}="решена","4C","3D"),"A|неуд","2F","A|уд","3D","A|хорошо","4C","A|очень хорошо",IF(M${row}="решена","5A","4B"),"S|неуд","2F","S|уд","3D","S|хорошо","4B","S|очень хорошо","5A",""))),"2F"))`;
+}
+
 function refreshCentral_() {
   const central = SpreadsheetApp.openById(getCentralId_());
   SpreadsheetApp.flush();
@@ -321,11 +325,9 @@ function refreshCentral_() {
     common.getRange(row, 7).setFormula(krStatusFormula_(row, 3, 92));
     common.getRange(row, 8).setFormula(krStatusFormula_(row, 96, 185));
     common.getRange(row, 9).setFormula(
-      `=IF(A${row}="","",IF(AND(E${row}+IF(K${row}="",0,K${row})>=55,F${row}+IF(J${row}="",0,J${row})>=24),"S",IF(AND(E${row}+IF(K${row}="",0,K${row})>=35,F${row}+IF(J${row}="",0,J${row})>=14),"A",IF(E${row}+IF(K${row}="",0,K${row})>=17,"B","Допса"))))`
+      `=IF(A${row}="","",IF(AND(E${row}+IF(K${row}="",0,K${row})>=55,F${row}+IF(J${row}="",0,J${row})>=24),"S",IF(AND(E${row}+IF(K${row}="",0,K${row})>=35,F${row}+IF(J${row}="",0,J${row})>=14),"A",IF(E${row}+IF(K${row}="",0,K${row})>=17,"B","F"))))`
     );
-    common.getRange(row, 13).setFormula(
-      `=IF(OR(A${row}="",L${row}=""),"",IF(I${row}="B",IF(L${row}="неуд","2F",IF(L${row}="уд","3E",IF(L${row}="хорошо","3D","3D/4C"))),IF(I${row}="A",IF(L${row}="неуд","2F",IF(L${row}="уд","3D",IF(L${row}="хорошо","4C","4B/5A"))),IF(I${row}="S",IF(L${row}="неуд","2F",IF(L${row}="уд","3D",IF(L${row}="хорошо","4B/5A","5A")),""))))`
-    );
+    common.getRange(row, 14).setFormula(finalGradeFormula_(row));
   }
   SpreadsheetApp.flush();
   refreshRanking_(central);
@@ -338,7 +340,7 @@ function refreshRanking_(central) {
   const rows = common.getRange(DM.commonFirstRow, 1, 90, 9).getDisplayValues()
     .filter(row => String(row[0]).trim() && isActiveValue_(row[3]))
     .map(row => [row[0], row[1], row[4], row[5], row[8]]);
-  const tierOrder = { 'S': 0, 'A': 1, 'B': 2, 'Допса': 3 };
+  const tierOrder = { 'S': 0, 'A': 1, 'B': 2, 'F': 3 };
   rows.sort((a, b) => {
     const tierA = tierOrder[a[4]] === undefined ? 99 : tierOrder[a[4]];
     const tierB = tierOrder[b[4]] === undefined ? 99 : tierOrder[b[4]];

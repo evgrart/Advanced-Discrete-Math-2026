@@ -47,6 +47,20 @@ def cw_status_formula(row, first_row, last_row):
     return f'=IF(A{row}="","",IF({"+".join(parts)}>=4,"зачет","незачет"))'
 
 
+def final_grade_formula(row):
+    """Return one final grade, resolving slash grades through the task result."""
+    return (
+        f'=IF(A{row}="","",IF(AND(G{row}="зачет",H{row}="зачет"),IF(I{row}="F","2F",IF(L{row}="","",'
+        f'SWITCH(I{row}&"|"&L{row},'
+        f'"B|неуд","2F","B|уд","3E","B|хорошо","3D",'
+        f'"B|очень хорошо",IF(M{row}="решена","4C","3D"),'
+        f'"A|неуд","2F","A|уд","3D","A|хорошо","4C",'
+        f'"A|очень хорошо",IF(M{row}="решена","5A","4B"),'
+        f'"S|неуд","2F","S|уд","3D","S|хорошо","4B",'
+        f'"S|очень хорошо","5A",""))),"2F"))'
+    )
+
+
 def hide_top_rows(ws):
     ws.row_dimensions[1].hidden = True
     ws.row_dimensions[2].hidden = True
@@ -106,8 +120,16 @@ def add_validation(ws, cell_range, values, message, kind="list"):
 
 def color_tasks(ws, header_row, first_row, last_row):
     for col in range(6, 36):
-        ws.cell(header_row, col).fill = PatternFill("solid", fgColor="38761D")
-        ws.cell(header_row, col).font = Font(bold=True, color=WHITE)
+        ws.cell(header_row, col).fill = PatternFill("solid", fgColor="FFF2CC")
+        ws.cell(header_row, col).font = Font(bold=True, color="000000")
+    ws.conditional_formatting.add(
+        f"F{header_row}:AI{header_row}",
+        FormulaRule(
+            formula=[f'COUNTIF(F${first_row}:F${last_row},"1")>0'],
+            fill=PatternFill("solid", fgColor=ONE_GREEN),
+            font=Font(bold=True, color=WHITE),
+        ),
+    )
     rng = f"F{first_row}:AI{last_row}"
     anchor = f"F{first_row}"
     ws.conditional_formatting.add(rng, FormulaRule(
@@ -121,10 +143,10 @@ def color_tasks(ws, header_row, first_row, last_row):
 def make_common_legacy(wb):
     ws = wb.create_sheet("Общий")
     hide_top_rows(ws)
-    headers = ["ФИО", "Практик", "TG", "Прод", "D", "CW", "КР-1", "КР-2", "Тир", "Бонус к CW", "Бонус к D", "Экзамен", "Итоговая оценка"]
+    headers = ["ФИО", "Практик", "TG", "Прод", "D", "CW", "КР-1", "КР-2", "Тир", "Бонус к CW", "Бонус к D", "Экзамен", "Задача", "Итоговая оценка"]
     for col, value in enumerate(headers, 1):
         ws.cell(3, col, value)
-    header_style(ws, 3, 13)
+    header_style(ws, 3, 14)
     for row in range(4, 94):
         name = f"Студент{1 if row <= 33 else 2 if row <= 63 else 3}.{row - (3 if row <= 33 else 33 if row <= 63 else 63)}"
         practitioner = PRACTITIONERS[0 if row <= 33 else 1 if row <= 63 else 2]
@@ -135,18 +157,20 @@ def make_common_legacy(wb):
         ws.cell(row, 6, f'=IF(A{row}="","",SUMIF(\'CW\'!$A:$A,A{row},\'CW\'!$D:$D))')
         ws.cell(row, 7, cw_status_formula(row, 3, 92))
         ws.cell(row, 8, cw_status_formula(row, 96, 185))
-        ws.cell(row, 9, f'=IF(A{row}="","",IF(AND(E{row}+IF(K{row}="",0,K{row})>=55,F{row}+IF(J{row}="",0,J{row})>=24),"S",IF(AND(E{row}+IF(K{row}="",0,K{row})>=35,F{row}+IF(J{row}="",0,J{row})>=14),"A",IF(E{row}+IF(K{row}="",0,K{row})>=17,"B","Допса"))))')
+        ws.cell(row, 9, f'=IF(A{row}="","",IF(AND(E{row}+IF(K{row}="",0,K{row})>=55,F{row}+IF(J{row}="",0,J{row})>=24),"S",IF(AND(E{row}+IF(K{row}="",0,K{row})>=35,F{row}+IF(J{row}="",0,J{row})>=14),"A",IF(E{row}+IF(K{row}="",0,K{row})>=17,"B","F"))))')
         ws.cell(row, 10, "")
         ws.cell(row, 11, "")
         ws.cell(row, 12).fill = PatternFill("solid", fgColor=INPUT)
         ws.cell(row, 11, f'=IF(OR(A{row}="",J{row}=""),"",IF(G{row}="B",IF(J{row}="неуд","2F",IF(J{row}="уд","3E",IF(J{row}="хорошо","3D","3D/4C"))),IF(G{row}="A",IF(J{row}="неуд","2F",IF(J{row}="уд","3D",IF(J{row}="хорошо","4C","4B/5A"))),IF(G{row}="S",IF(J{row}="неуд","2F",IF(J{row}="уд","3D",IF(J{row}="хорошо","4B/5A","5A"))),""))))')
-        for col in [1, 2, 3, 4, 10, 11, 12]:
+        ws.cell(row, 13, "")
+        ws.cell(row, 14, final_grade_formula(row))
+        for col in [1, 2, 3, 4, 10, 11, 12, 13]:
             ws.cell(row, col).protection = Protection(locked=False)
             ws.cell(row, col).fill = PatternFill("solid", fgColor=INPUT)
-    body_style(ws, 4, 93, 1, 13)
-    align_right(ws, 4, 93, [1, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13])
+    body_style(ws, 4, 93, 1, 14)
+    align_right(ws, 4, 93, [1, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14])
     align_center(ws, 4, 93, [2, 9])
-    ws.conditional_formatting.add("A4:M93", FormulaRule(formula=['AND($G4="зачет",$H4="зачет")'], fill=PatternFill("solid", fgColor=PLUS_GREEN), font=Font(color="000000")))
+    ws.conditional_formatting.add("A4:N93", FormulaRule(formula=['AND($G4="зачет",$H4="зачет")'], fill=PatternFill("solid", fgColor=PLUS_GREEN), font=Font(color="000000")))
     add_validation(ws, "B4:B93", ",".join(PRACTITIONERS), "Выберите практика")
     add_validation(ws, "D4:D93", "Да,Нет", "Выберите Да или Нет")
     bonus = DataValidation(type="decimal", operator="between", formula1="-100", formula2="100", allow_blank=True)
@@ -167,10 +191,10 @@ def make_common_legacy(wb):
 def make_common(wb):
     ws = wb.create_sheet("Общий")
     hide_top_rows(ws)
-    headers = ["ФИО", "Практик", "TG", "Прод", "D", "CW", "КР-1", "КР-2", "Тир", "Бонус к CW", "Бонус к D", "Экзамен", "Итоговая оценка"]
+    headers = ["ФИО", "Практик", "TG", "Прод", "D", "CW", "КР-1", "КР-2", "Тир", "Бонус к CW", "Бонус к D", "Экзамен", "Задача", "Итоговая оценка"]
     for col, value in enumerate(headers, 1):
         ws.cell(3, col, value)
-    header_style(ws, 3, 13)
+    header_style(ws, 3, 14)
     for row in range(4, 94):
         name = f"Студент{1 if row <= 33 else 2 if row <= 63 else 3}.{row - (3 if row <= 33 else 33 if row <= 63 else 63)}"
         practitioner = PRACTITIONERS[0 if row <= 33 else 1 if row <= 63 else 2]
@@ -181,18 +205,19 @@ def make_common(wb):
         ws.cell(row, 6, f'=IF(A{row}="","",SUMIF(\'CW\'!$A:$A,A{row},\'CW\'!$D:$D))')
         ws.cell(row, 7, cw_status_formula(row, 3, 92))
         ws.cell(row, 8, cw_status_formula(row, 96, 185))
-        ws.cell(row, 9, f'=IF(A{row}="","",IF(AND(E{row}+IF(K{row}="",0,K{row})>=55,F{row}+IF(J{row}="",0,J{row})>=24),"S",IF(AND(E{row}+IF(K{row}="",0,K{row})>=35,F{row}+IF(J{row}="",0,J{row})>=14),"A",IF(E{row}+IF(K{row}="",0,K{row})>=17,"B","Допса"))))')
+        ws.cell(row, 9, f'=IF(A{row}="","",IF(AND(E{row}+IF(K{row}="",0,K{row})>=55,F{row}+IF(J{row}="",0,J{row})>=24),"S",IF(AND(E{row}+IF(K{row}="",0,K{row})>=35,F{row}+IF(J{row}="",0,J{row})>=14),"A",IF(E{row}+IF(K{row}="",0,K{row})>=17,"B","F"))))')
         ws.cell(row, 10, "")
         ws.cell(row, 11, "")
         ws.cell(row, 12).fill = PatternFill("solid", fgColor=INPUT)
-        ws.cell(row, 13, f'=IF(OR(A{row}="",L{row}=""),"",IF(I{row}="B",IF(L{row}="неуд","2F",IF(L{row}="уд","3E",IF(L{row}="хорошо","3D","3D/4C"))),IF(I{row}="A",IF(L{row}="неуд","2F",IF(L{row}="уд","3D",IF(L{row}="хорошо","4C","4B/5A"))),IF(I{row}="S",IF(L{row}="неуд","2F",IF(L{row}="уд","3D",IF(L{row}="хорошо","4B/5A","5A")),""))))')
-        for col in [1, 2, 3, 4, 10, 11, 12]:
+        ws.cell(row, 13, "")
+        ws.cell(row, 14, final_grade_formula(row))
+        for col in [1, 2, 3, 4, 10, 11, 12, 13]:
             ws.cell(row, col).protection = Protection(locked=False)
             ws.cell(row, col).fill = PatternFill("solid", fgColor=INPUT)
-    body_style(ws, 4, 93, 1, 13)
-    align_right(ws, 4, 93, [1, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13])
+    body_style(ws, 4, 93, 1, 14)
+    align_right(ws, 4, 93, [1, 3, 4, 5, 6, 7, 8, 10, 11, 12, 13, 14])
     align_center(ws, 4, 93, [2, 9])
-    ws.conditional_formatting.add("A4:M93", FormulaRule(formula=['AND($G4="зачет",$H4="зачет")'], fill=PatternFill("solid", fgColor=PLUS_GREEN), font=Font(color="000000")))
+    ws.conditional_formatting.add("A4:N93", FormulaRule(formula=['AND($G4="зачет",$H4="зачет")'], fill=PatternFill("solid", fgColor=PLUS_GREEN), font=Font(color="000000")))
     add_validation(ws, "B4:B93", ",".join(PRACTITIONERS), "Выберите практика")
     add_validation(ws, "D4:D93", "Да,Нет", "Выберите Да или Нет")
     bonus = DataValidation(type="decimal", operator="between", formula1="-100", formula2="100", allow_blank=True)
@@ -202,10 +227,11 @@ def make_common(wb):
     ws.add_data_validation(bonus)
     bonus.add("J4:K93")
     add_validation(ws, "L4:L93", "неуд,уд,хорошо,очень хорошо", "Выберите категорию экзамена")
+    add_validation(ws, "M4:M93", "решена,не решена", "Выберите: решена или не решена")
     ws.freeze_panes = "D4"
-    ws.auto_filter.ref = "A3:M93"
+    ws.auto_filter.ref = "A3:N93"
     ws.sheet_view.showGridLines = False
-    for col, width in {"A": 27, "B": 12, "C": 22, "D": 10, "E": 10, "F": 10, "G": 12, "H": 12, "I": 12, "J": 12, "K": 12, "L": 22, "M": 20}.items():
+    for col, width in {"A": 27, "B": 12, "C": 22, "D": 10, "E": 10, "F": 10, "G": 12, "H": 12, "I": 12, "J": 12, "K": 12, "L": 22, "M": 15, "N": 20}.items():
         ws.column_dimensions[col].width = width
     return ws
 
@@ -339,7 +365,7 @@ def make_plus(path, practitioner, index):
             for col in range(6, 36):
                 ws.cell(row, col).number_format = "@"
                 ws.cell(row, col).protection = Protection(locked=False)
-                ws.cell(row, col).fill = PatternFill("solid", fgColor="FFF2CC")
+                ws.cell(row, col).fill = PatternFill("solid", fgColor=INPUT)
         body_style(ws, first, last, 1, 35)
         align_right(ws, first, last, [1, 3, 4, 5] + list(range(6, 36)))
         align_center(ws, first, last, [2])
