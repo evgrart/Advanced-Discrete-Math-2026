@@ -21,7 +21,8 @@ SOURCE = next(p for p in ROOT.glob("*.xlsx") if p.name == "ДМ Артём.xlsx"
 PRACTICE_COUNT = 15
 STUDENTS_PER_GROUP = 30
 TASK_COUNT = 30
-PLUS_BLOCK_SIZE = 68
+# Одна практика: строка-заголовок, строка названий, 30 студентов и пустой разделитель.
+PLUS_BLOCK_SIZE = 33
 
 NAVY = "17365D"
 GREEN = "70AD47"
@@ -37,13 +38,22 @@ THIN = Side(style="thin", color="D9E1F2")
 
 
 def title(ws, text, subtitle, end_col):
-    ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_col)
-    ws["A1"] = text
-    ws["A1"].font = Font(size=18, bold=True, color=NAVY)
-    ws["A1"].alignment = Alignment(horizontal="center")
-    ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=end_col)
+    # Верхние служебные названия убраны: первая видимая строка — рабочая таблица.
+    ws["A1"] = None
     ws["A2"] = None
-    ws.row_dimensions[2].height = 8
+    ws.row_dimensions[1].hidden = True
+    ws.row_dimensions[2].hidden = True
+
+
+def task_label(value):
+    text = "" if value is None else str(value).strip()
+    try:
+        number = float(text.replace(",", "."))
+        if number.is_integer():
+            return str(int(number))
+    except ValueError:
+        pass
+    return text
 
 
 def header_style(ws, row, end_col):
@@ -96,8 +106,7 @@ def build_cw_sheet(ws, source_path):
     ws.unmerge_cells("A1:K1")
     ws.unmerge_cells("A2:K2")
     ws["A2"] = None
-    ws["K1"] = "CW"
-    ws["K1"].font = Font(bold=True, color=NAVY)
+    ws["K1"] = None
     ws["K2"] = None
 
     all_section_starts = []
@@ -123,12 +132,12 @@ def build_cw_sheet(ws, source_path):
         ws.cell(weight_row, 4, "W")
         for col in range(4, 9):
             ws.cell(weight_row, col + 1, source.cell(weight_row, col).value)
-        ws.cell(header_row, 1, "Имя")
+        ws.cell(header_row, 1, "ФИО")
         ws.cell(header_row, 2, "Попытка")
         ws.cell(header_row, 3, "TG")
         ws.cell(header_row, 4, "S")
         for col in range(4, 9):
-            ws.cell(header_row, col + 1, source.cell(header_row, col).value)
+            ws.cell(header_row, col + 1, task_label(source.cell(header_row, col).value))
         header_style(ws, header_row, 11)
         for col, fill in [(1, "A9D18E"), (2, "FFF2CC"), (3, "9DC3E6"), (4, "F4B183")]:
             ws.cell(header_row, col).fill = PatternFill("solid", fgColor=fill)
@@ -183,8 +192,7 @@ def build_cw_sheet(ws, source_path):
 def build_cw_sheet_template(ws, source_path, students):
     source_wb = load_workbook(source_path, data_only=False)
     source = source_wb.worksheets[0]
-    ws["K1"] = "CW"
-    ws["K1"].font = Font(bold=True, color=NAVY)
+    ws["K1"] = None
     ws["K2"] = None
 
     all_section_starts = []
@@ -206,7 +214,7 @@ def build_cw_sheet_template(ws, source_path, students):
         ws.cell(weight_row, 4, "W")
         for col in range(4, 9):
             ws.cell(weight_row, col + 1, source.cell(start + 1, col).value)
-        headers = ["Имя", "Попытка", "TG", "S"] + [source.cell(start + 2, col).value for col in range(4, 9)]
+        headers = ["ФИО", "Попытка", "TG", "S"] + [task_label(source.cell(start + 2, col).value) for col in range(4, 9)]
         for col, value in enumerate(headers, start=1):
             ws.cell(header_row, col, value)
         header_style(ws, header_row, 11)
@@ -258,9 +266,9 @@ def build_ladder_sheet(ws):
         ws.cell(3, col, value)
     header_style(ws, 3, 11)
     for row in range(4, 3007):
-        ws.cell(row, 5, f'=IF(A{row}="","",COUNTIFS($A$4:A{row},A{row},$I$4:I{row},"<>Штраф -2",$I$4:I{row},"<>ушел на базу"))')
+        ws.cell(row, 5, f'=IF(A{row}="","",COUNTIFS($A$4:A{row},A{row},$F$4:F{row},"<>",$I$4:I{row},"<>ушел на базу"))')
         ws.cell(row, 6, f'=IF(E{row}="","",IF(E{row}<=3,6,IF(E{row}<=6,5,IF(E{row}<=9,4,IF(E{row}<=12,3,IF(E{row}<=15,2,0))))))')
-        ws.cell(row, 8, f'=IF(I{row}="Штраф -2",-2,IF(OR(F{row}="",G{row}=""),"",F{row}*G{row}+IF(J{row}="",0,J{row})))')
+        ws.cell(row, 8, f'=IF(OR(F{row}="",G{row}=""),"",F{row}*G{row}+IF(J{row}="",0,J{row}))')
         for col in [1, 2, 3, 4, 7, 9, 10, 11]:
             ws.cell(row, col).fill = PatternFill("solid", fgColor=INPUT)
             ws.cell(row, col).protection = Protection(locked=False)
@@ -274,44 +282,39 @@ def build_ladder_sheet(ws):
 
 
 def build_ranking_sheet(ws):
-    title(ws, "Общий рейтинг", "", 9)
-    headers = ["Практик", "ФИО", "TG", "Прод", "D", "CW", "Тир", "Экзамен", "Комментарий"]
+    title(ws, "Общий рейтинг", "", 7)
+    headers = ["ФИО", "Практик", "TG", "Прод", "D", "CW", "Тир"]
     for col, value in enumerate(headers, start=1):
         ws.cell(3, col, value)
-    header_style(ws, 3, 9)
-    body_style(ws, 4, 93, 1, 9)
+    header_style(ws, 3, 7)
+    body_style(ws, 4, 93, 1, 7)
     ws.freeze_panes = "A4"
     ws.sheet_view.showGridLines = False
-    for col, width in {"A": 12, "B": 27, "C": 22, "D": 10, "E": 10, "F": 10, "G": 12, "H": 22, "I": 30}.items():
+    for col, width in {"A": 27, "B": 12, "C": 22, "D": 10, "E": 10, "F": 10, "G": 12}.items():
         ws.column_dimensions[col].width = width
     ws.protection.sheet = False
 
 
 def build_plus_sheet(ws, practitioner, roster, task_labels, task_values, result_values, common_config_ref, practitioner_no):
-    """Create 15 identical practice blocks on one practitioner sheet."""
+    """Create one table for each of the 15 practices on one practitioner sheet."""
     end_task_col = 35  # F:AI = 30 tasks
-    task_labels = [str(x) for x in task_labels[:TASK_COUNT]]
+    task_labels = [task_label(x) for x in task_labels[:TASK_COUNT]]
     task_labels += [str(i) for i in range(len(task_labels) + 1, TASK_COUNT + 1)]
     template_roster = roster[:STUDENTS_PER_GROUP] + [("", "")] * max(0, STUDENTS_PER_GROUP - len(roster))
 
-    title(ws, f"Плюсы — {practitioner}", "В каждом блоке одна практика. В верхней таблице ставятся +; практик может заменить + на 1. В нижней таблице практик отмечает 1 или -.", end_task_col)
+    title(ws, f"Плюсы — {practitioner}", "", end_task_col)
 
     for practice_no in range(1, PRACTICE_COUNT + 1):
         block_start = 4 + (practice_no - 1) * PLUS_BLOCK_SIZE
         plus_header = block_start + 1
         plus_first = block_start + 2
         plus_last = plus_first + STUDENTS_PER_GROUP - 1
-        result_title = block_start + 33
-        result_header = block_start + 34
-        result_first = result_header + 1
-        result_last = result_first + STUDENTS_PER_GROUP - 1
-
         ws.merge_cells(start_row=block_start, start_column=1, end_row=block_start, end_column=end_task_col)
         ws.cell(block_start, 1, f"Практика {practice_no} — плюсы")
         ws.cell(block_start, 1).font = Font(size=14, bold=True, color=NAVY)
         ws.cell(block_start, 1).fill = PatternFill("solid", fgColor="D9D9D9")
 
-        headers = ["Имя", "TG", "S", "Коэффициент", "D за практику"] + task_labels
+        headers = ["ФИО", "TG", "S", "Коэффициент", "D за практику"] + task_labels
         for col, value in enumerate(headers, start=1):
             ws.cell(plus_header, col, value)
         header_style(ws, plus_header, end_task_col)
@@ -333,36 +336,11 @@ def build_plus_sheet(ws, practitioner, roster, task_labels, task_values, result_
                 ws.cell(row, col).protection = Protection(locked=False)
                 ws.cell(row, col).number_format = "@"
         body_style(ws, plus_first, plus_last, 1, end_task_col)
-        add_validation(ws, f"F{plus_first}:AI{plus_last}", "+,1,-", "Студент ставит +; практик может поставить 1 или -")
+        add_validation(ws, f"F{plus_first}:AI{plus_last}", "+,1,-", "Для плюса в Google Sheets вводите '+; практик может поставить 1 или -")
         ws.conditional_formatting.add(f"C{plus_first}:C{plus_last}", CellIsRule(operator="greaterThanOrEqual", formula=["21"], fill=PatternFill("solid", fgColor=GREEN)))
         ws.conditional_formatting.add(f"C{plus_first}:C{plus_last}", CellIsRule(operator="between", formula=["15", "20"], fill=PatternFill("solid", fgColor="A9D18E")))
         ws.conditional_formatting.add(f"C{plus_first}:C{plus_last}", CellIsRule(operator="lessThan", formula=["15"], fill=PatternFill("solid", fgColor=LIGHT_GREEN)))
         color_plus_sheet(ws, plus_header, plus_first, plus_last, 6, end_task_col)
-
-        ws.merge_cells(start_row=result_title, start_column=1, end_row=result_title, end_column=end_task_col)
-        ws.cell(result_title, 1, f"Практика {practice_no} — результаты рассказа")
-        ws.cell(result_title, 1).font = Font(size=12, bold=True, color=NAVY)
-        ws.cell(result_title, 1).fill = PatternFill("solid", fgColor="D9EAD3")
-        result_headers = ["Имя", "TG", "", "", ""] + task_labels
-        for col, value in enumerate(result_headers, start=1):
-            ws.cell(result_header, col, value)
-        header_style(ws, result_header, end_task_col)
-        for col, fill in [(1, "A9D18E"), (2, "9DC3E6")]:
-            ws.cell(result_header, col).fill = PatternFill("solid", fgColor=fill)
-            ws.cell(result_header, col).font = Font(bold=True, color="000000")
-        for col in range(6, end_task_col + 1):
-            ws.cell(result_header, col).fill = PatternFill("solid", fgColor="C00000")
-            ws.cell(result_header, col).font = Font(bold=True, color=WHITE)
-        for row, (name, tg) in enumerate(template_roster, start=result_first):
-            ws.cell(row, 1, name)
-            ws.cell(row, 2, tg)
-            for col in range(6, end_task_col + 1):
-                ws.cell(row, col).fill = PatternFill("solid", fgColor=INPUT)
-                ws.cell(row, col).protection = Protection(locked=False)
-                ws.cell(row, col).number_format = "@"
-        body_style(ws, result_first, result_last, 1, end_task_col)
-        add_validation(ws, f"F{result_first}:AI{result_last}", "1,-", "Практик может ввести только 1, - или оставить пусто")
-        color_plus_sheet(ws, result_header, result_first, result_last, 6, end_task_col)
 
     ws.protection.sheet = False
     ws.freeze_panes = "F6"
@@ -389,7 +367,7 @@ def build():
 
     common = wb.create_sheet("Общий")
     title(common, "Дискретная математика — общий лист", "", 9)
-    common.append(["Практик", "ФИО", "TG", "Прод", "D", "CW", "Тир", "Экзамен", "Комментарий"])
+    common.append(["ФИО", "Практик", "TG", "Прод", "D", "CW", "Тир", "Экзамен", "Комментарий"])
     header_style(common, 3, 9)
     students = [("Артём", name, tg) for name, tg in roster]
     students += [("Артём", "", "")] * max(0, 30 - len(roster))
@@ -397,25 +375,25 @@ def build():
     students += [("Немат", "", "")] * 30
     students = all_students
     for row, (pr, name, tg) in enumerate(students, start=4):
-        common.cell(row, 1, pr)
-        common.cell(row, 2, name)
+        common.cell(row, 1, name)
+        common.cell(row, 2, pr)
         common.cell(row, 3, tg)
         common.cell(row, 4, "Да")
-        common.cell(row, 5, f'=IF(B{row}="","",SUMIF(\'Логи\'!$A$4:$A$3006,B{row},\'Логи\'!$H$4:$H$3006))')
-        common.cell(row, 6, f'=IF(B{row}="","",SUMIF(\'CW\'!$A:$A,B{row},\'CW\'!$D:$D))')
-        common.cell(row, 7, f'=IF(B{row}="","",IF(AND(E{row}>=55,F{row}>=24),"S",IF(AND(E{row}>=35,F{row}>=14),"A",IF(E{row}>=17,"B","Допса"))))')
+        common.cell(row, 5, f'=IF(A{row}="","",SUMIF(\'Логи\'!$A$4:$A$3006,A{row},\'Логи\'!$H$4:$H$3006))')
+        common.cell(row, 6, f'=IF(A{row}="","",SUMIF(\'CW\'!$A:$A,A{row},\'CW\'!$D:$D))')
+        common.cell(row, 7, f'=IF(A{row}="","",IF(AND(E{row}>=55,F{row}>=24),"S",IF(AND(E{row}>=35,F{row}>=14),"A",IF(E{row}>=17,"B","Допса"))))')
         for col in [1, 4, 5, 6, 8, 9]:
             common.cell(row, col).protection = Protection(locked=False)
             common.cell(row, col).fill = PatternFill("solid", fgColor=INPUT)
     body_style(common, 4, 93, 1, 9)
-    add_validation(common, "A4:A93", "Артём,Рами,Немат", "Выберите практика")
+    add_validation(common, "B4:B93", "Артём,Рами,Немат", "Выберите практика")
     add_validation(common, "D4:D93", "Да,Нет", "Выберите статус студента: Да или Нет")
     add_validation(common, "H4:H93", "неуд,уд,хорошо,очень хорошо", "Выберите категорию экзамена")
     header_style(common, 3, 9)
     common.freeze_panes = "D4"
     common.auto_filter.ref = "A3:I93"
     common.sheet_view.showGridLines = False
-    for col, width in {"A": 12, "B": 27, "C": 22, "D": 10, "E": 10, "F": 10, "G": 12, "H": 22, "I": 30}.items():
+    for col, width in {"A": 27, "B": 12, "C": 22, "D": 10, "E": 10, "F": 10, "G": 12, "H": 22, "I": 30}.items():
         common.column_dimensions[col].width = width
     # Лист намеренно не защищён: практик должен менять группы, Прод и экзамен.
     common.protection.sheet = False
