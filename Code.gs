@@ -3,22 +3,23 @@ const DM = {
   centralFileId: '1RIDAw8VWB76L6E2RDaiSiyj9UlLk0c0P-rfs3WivcFM',
   plusFileIds: {
     'Артём': '',
-    'Рами': '',
-    'Немат': ''
+    'Рами': '1WG-5ZdLOjKTiy9hG-muEugFT16jjxcCQMi3_N46rA3c',
+    'Немат': '1SnTIZRF7mJByn0WEZyC1zooNE3y1gG7r2TXWos1HW_o'
   },
   practitioners: ['Артём', 'Рами', 'Немат'],
   common: 'Общий',
   cw: 'CW',
   ranking: 'Рейтинг',
   logs: 'Логи',
+  plusLogs: 'Логи',
   practiceCount: 15,
   studentsPerGroup: 30,
   plusHeaderRow: 3,
   plusFirstRow: 4,
-  plusCoefficientCol: 3,
-  plusTotalCol: 4,
-  taskFirstCol: 5,
-  taskLastCol: 34,
+  plusCoefficientCol: 4,
+  plusTotalCol: 5,
+  taskFirstCol: 6,
+  taskLastCol: 35,
   commonFirstRow: 4,
   commonLastRow: 93,
   logFirstRow: 4,
@@ -78,6 +79,10 @@ function handleCentralEdit_(event) {
       syncGroups_();
       return;
     }
+    if (col === 8 || col === 9) {
+      refreshCentral_();
+      return;
+    }
   }
 
   if (sheet.getName() === DM.cw ||
@@ -108,6 +113,13 @@ function handlePlusEdit_(event, practitioner) {
   const taskName = String(sheet.getRange(plusHeader, col).getDisplayValue()).trim();
   if (!studentName || !taskName) return;
 
+  const normalizedOldValue = oldPlusValue_(oldValue);
+  if (value === '+' && normalizedOldValue !== '+') {
+    appendPlusHistory_(event.source, studentName, practiceNo, taskName, 'Поставил');
+  } else if (normalizedOldValue === '+' && value !== '+') {
+    appendPlusHistory_(event.source, studentName, practiceNo, taskName, 'Убрал');
+  }
+
   const central = SpreadsheetApp.openById(getCentralId_());
   const practitionerNo = DM.practitioners.indexOf(practitioner) + 1;
 
@@ -136,8 +148,8 @@ function handlePlusEdit_(event, practitioner) {
   if (value === '' || value === '+') {
     if (oldValue === '1' || oldValue === '-') {
       removeLogRecord_(central, practitioner, practiceNo, studentName, taskName, false);
-      refreshCentral_();
     }
+    refreshCentral_();
   }
 }
 
@@ -183,6 +195,20 @@ function appendNormalLog_(central, plusFile, plusSheet, practitionerNo,
   );
   logs.getRange(newRow, 11).setNumberFormat('yyyy-mm-dd hh:mm');
   return { ok: true, message: `Начислено D: ${base * coefficient}` };
+}
+
+function appendPlusHistory_(plusFile, studentName, practiceNo, taskName, state) {
+  const logs = plusFile.getSheetByName(DM.plusLogs);
+  if (!logs) return;
+  const lastRow = Math.max(logs.getLastRow() + 1, 2);
+  logs.getRange(lastRow, 1, 1, 5).setValues([[
+    studentName, practiceNo, taskName, state, new Date()
+  ]]);
+  logs.getRange(lastRow, 5).setNumberFormat('yyyy-mm-dd hh:mm');
+}
+
+function oldPlusValue_(value) {
+  return String(value == null ? '' : value).trim().replace(/^'/, '');
 }
 
 function appendPenaltyLog_(central, practitioner, practiceNo, studentName, taskName) {
@@ -253,6 +279,9 @@ function syncTable() {
 
 function refreshCentral_() {
   const central = SpreadsheetApp.openById(getCentralId_());
+  SpreadsheetApp.flush();
+  refreshLogCoefficients_(central);
+  SpreadsheetApp.flush();
   const common = central.getSheetByName(DM.common);
   for (let row = DM.commonFirstRow; row <= DM.commonLastRow; row++) {
     common.getRange(row, 5).setFormula(
@@ -260,7 +289,10 @@ function refreshCentral_() {
     );
     common.getRange(row, 6).setFormula(`=IF(A${row}="","",SUMIF('${DM.cw}'!$A:$A,A${row},'${DM.cw}'!$D:$D))`);
     common.getRange(row, 7).setFormula(
-      `=IF(A${row}="","",IF(AND(E${row}>=55,F${row}>=24),"S",IF(AND(E${row}>=35,F${row}>=14),"A",IF(E${row}>=17,"B","Допса"))))`
+      `=IF(A${row}="","",IF(AND(E${row}+IF(I${row}="",0,I${row})>=55,F${row}+IF(H${row}="",0,H${row})>=24),"S",IF(AND(E${row}+IF(I${row}="",0,I${row})>=35,F${row}+IF(H${row}="",0,H${row})>=14),"A",IF(E${row}+IF(I${row}="",0,I${row})>=17,"B","Допса"))))`
+    );
+    common.getRange(row, 11).setFormula(
+      `=IF(OR(A${row}="",J${row}=""),"",IF(G${row}="B",IF(J${row}="неуд","2F",IF(J${row}="уд","3E",IF(J${row}="хорошо","3D","3D/4C"))),IF(G${row}="A",IF(J${row}="неуд","2F",IF(J${row}="уд","3D",IF(J${row}="хорошо","4C","4B/5A"))),IF(G${row}="S",IF(J${row}="неуд","2F",IF(J${row}="уд","3D",IF(J${row}="хорошо","4B/5A","5A"))),""))))`
     );
   }
   SpreadsheetApp.flush();
@@ -309,6 +341,7 @@ function syncGroups_() {
         if (!sheet) continue;
         const first = DM.plusFirstRow;
         sheet.getRange(first, 1, DM.studentsPerGroup, 1).clearContent();
+        sheet.getRange(first, 2, DM.studentsPerGroup, 1).clearContent();
         sheet.getRange(first, DM.taskFirstCol, DM.studentsPerGroup, 30).clearContent();
         groups[index].slice(0, DM.studentsPerGroup).forEach((student, offset) => {
           const row = first + offset;
@@ -319,7 +352,8 @@ function syncGroups_() {
               ? snapshots.bySlot[practitioner][practice][offset]
               : null;
           if (saved) {
-            sheet.getRange(row, DM.taskFirstCol, 1, 30).setValues([saved]);
+            sheet.getRange(row, 2).setValue(saved.presence);
+            sheet.getRange(row, DM.taskFirstCol, 1, 30).setValues([saved.tasks]);
           }
         });
       }
@@ -337,15 +371,15 @@ function syncCwRoster_(central) {
   const commonRows = central.getSheetByName(DM.common).getRange(DM.commonFirstRow, 1, 90, 2).getDisplayValues();
   const cw = central.getSheetByName(DM.cw);
   const saved = {};
-  [2, 94].forEach(firstRow => {
+  [3, 96].forEach(firstRow => {
     cw.getRange(firstRow, 1, 90, 9).getValues().forEach(row => {
       const name = String(row[0] == null ? '' : row[0]).trim();
       if (!name) return;
       saved[name] = { attempt: row[2], scores: row.slice(4, 9) };
     });
   });
-  // Два блока по 90 студентов: шапки находятся в строках 1 и 93.
-  [2, 94].forEach(firstRow => {
+  // Два блока по 90 студентов: шапки находятся в строках 1 и 95.
+  [3, 96].forEach(firstRow => {
     commonRows.forEach((row, offset) => {
       const target = firstRow + offset;
       const previous = saved[String(row[0]).trim()];
@@ -366,15 +400,21 @@ function collectSnapshots_() {
       const sheet = getPlusSheet_(file, practice);
       if (!sheet) continue;
       const first = DM.plusFirstRow;
-      const rows = sheet.getRange(first, 1, DM.studentsPerGroup, 34).getValues();
+      const rows = sheet.getRange(first, 1, DM.studentsPerGroup, 35).getValues();
       snapshots.bySlot[practitioner] = snapshots.bySlot[practitioner] || {};
       snapshots.bySlot[practitioner][practice] = [];
       rows.forEach(row => {
         const name = String(row[0] == null ? '' : row[0]).trim();
-        snapshots.bySlot[practitioner][practice].push(row.slice(4, 34));
+        snapshots.bySlot[practitioner][practice].push({
+          presence: row[1],
+          tasks: row.slice(5, 35)
+        });
         if (!name) return;
         snapshots.byName[name] = snapshots.byName[name] || {};
-        snapshots.byName[name][practice] = row.slice(4, 34);
+        snapshots.byName[name][practice] = {
+          presence: row[1],
+          tasks: row.slice(5, 35)
+        };
       });
     }
   });
@@ -443,6 +483,45 @@ function clearPlusNotes_() {
         DM.studentsPerGroup, DM.taskLastCol - DM.taskFirstCol + 1).clearNote();
     }
   });
+}
+
+function refreshLogCoefficients_(central) {
+  const coefficients = {};
+  DM.practitioners.forEach(practitioner => {
+    const fileId = DM.plusFileIds[practitioner];
+    if (!fileId) return;
+    const file = SpreadsheetApp.openById(fileId);
+    for (let practice = 1; practice <= DM.practiceCount; practice++) {
+      const sheet = getPlusSheet_(file, practice);
+      if (!sheet) continue;
+      sheet.getRange(DM.plusFirstRow, 1, DM.studentsPerGroup, DM.plusCoefficientCol)
+        .getValues().forEach(row => {
+          const name = String(row[0] == null ? '' : row[0]).trim();
+          if (name) coefficients[name + '|' + practice] = Number(row[DM.plusCoefficientCol - 1]) || 0.5;
+        });
+    }
+  });
+
+  const logs = central.getSheetByName(DM.logs);
+  const lastRow = findLastLogRow_(logs);
+  if (lastRow < DM.logFirstRow) return;
+  const count = lastRow - DM.logFirstRow + 1;
+  const rows = logs.getRange(DM.logFirstRow, 1, count, 9).getValues();
+  const coefficientValues = rows.map(row => [row[6]]);
+  rows.forEach((row, index) => {
+    const base = row[5];
+    const student = String(row[0] == null ? '' : row[0]).trim();
+    const practice = Number(row[2]);
+    const key = student + '|' + practice;
+    const isNormal = student && practice && base !== '' && base != null && coefficients[key] != null;
+    if (!isNormal) return;
+    coefficientValues[index][0] = coefficients[key];
+    const targetRow = DM.logFirstRow + index;
+    logs.getRange(targetRow, 8).setFormula(
+      `=IF(OR(F${targetRow}="",G${targetRow}=""),"",F${targetRow}*G${targetRow}+IF(J${targetRow}="",0,J${targetRow}))`
+    );
+  });
+  logs.getRange(DM.logFirstRow, 7, count, 1).setValues(coefficientValues);
 }
 
 function reconcilePlusResults_(central) {
