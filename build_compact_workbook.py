@@ -25,6 +25,8 @@ PLUS_BLOCK_SIZE = 68
 
 NAVY = "17365D"
 GREEN = "70AD47"
+PLUS_GREEN = "C6E0B4"
+ONE_GREEN = "548235"
 LIGHT_GREEN = "E2F0D9"
 RED = "C00000"
 LIGHT_RED = "FCE4D6"
@@ -40,10 +42,8 @@ def title(ws, text, subtitle, end_col):
     ws["A1"].font = Font(size=18, bold=True, color=NAVY)
     ws["A1"].alignment = Alignment(horizontal="center")
     ws.merge_cells(start_row=2, start_column=1, end_row=2, end_column=end_col)
-    ws["A2"] = subtitle
-    ws["A2"].font = Font(italic=True, color="666666")
-    ws["A2"].alignment = Alignment(wrap_text=True)
-    ws.row_dimensions[2].height = 30
+    ws["A2"] = None
+    ws.row_dimensions[2].height = 8
 
 
 def header_style(ws, row, end_col):
@@ -74,8 +74,8 @@ def color_plus_sheet(ws, header_row, first_row, last_row, task_start, task_end):
 
     rng = f"{get_column_letter(task_start)}{first_row}:{get_column_letter(task_end)}{last_row}"
     anchor = f"{get_column_letter(task_start)}{first_row}"
-    ws.conditional_formatting.add(rng, FormulaRule(formula=[f'{anchor}="+"'], fill=PatternFill("solid", fgColor=GREEN)))
-    ws.conditional_formatting.add(rng, FormulaRule(formula=[f'{anchor}="1"'], fill=PatternFill("solid", fgColor=GREEN)))
+    ws.conditional_formatting.add(rng, FormulaRule(formula=[f'{anchor}="+"'], fill=PatternFill("solid", fgColor=PLUS_GREEN), font=Font(color="000000")))
+    ws.conditional_formatting.add(rng, FormulaRule(formula=[f'{anchor}="1"'], fill=PatternFill("solid", fgColor=ONE_GREEN), font=Font(color=WHITE)))
     ws.conditional_formatting.add(rng, FormulaRule(formula=[f'{anchor}="-"'], fill=PatternFill("solid", fgColor=RED), font=Font(color=WHITE)))
 
 
@@ -98,16 +98,16 @@ def build_cw_sheet(ws, source_path):
     ws["A2"] = None
     ws["K1"] = "CW"
     ws["K1"].font = Font(bold=True, color=NAVY)
-    ws["K2"] = "Попытка — номер текущей сдачи"
-    ws["K2"].font = Font(italic=True, color="666666")
+    ws["K2"] = None
 
-    section_starts = []
+    all_section_starts = []
     for row in range(1, source.max_row + 1):
         if source.cell(row, 4).value and source.cell(row, 1).value is None and source.cell(row, 3).value is None:
-            section_starts.append(row)
+            all_section_starts.append(row)
+    section_starts = [row for row in all_section_starts if str(source.cell(row, 4).value).strip() in ("КР-1", "КР-2")]
 
     for index, start in enumerate(section_starts):
-        next_start = section_starts[index + 1] if index + 1 < len(section_starts) else source.max_row + 1
+        next_start = next((value for value in all_section_starts if value > start), source.max_row + 1)
         title_row = start
         weight_row = start + 1
         header_row = start + 2
@@ -155,7 +155,14 @@ def build_cw_sheet(ws, source_path):
                     if source.cell(row, col if col <= 3 else col - 1).value is not None:
                         ws.cell(row, col, source.cell(row, col if col <= 3 else col - 1).value)
         body_style(ws, first_student, last_student, 1, 11)
-        add_validation(ws, f"B{first_student}:B{last_student}", "1,2,3,4", "Укажите номер попытки от 1 до 4")
+        attempt_validation = DataValidation(type="whole", operator="between", formula1="1", formula2="4", allow_blank=True)
+        attempt_validation.errorStyle = "stop"
+        attempt_validation.showErrorMessage = True
+        attempt_validation.error = "Введите целое число от 1 до 4"
+        ws.add_data_validation(attempt_validation)
+        attempt_validation.add(f"B{first_student}:B{last_student}")
+        for attempt_row in range(first_student, last_student + 1):
+            ws.cell(attempt_row, 2).number_format = "0"
         score_validation = DataValidation(type="decimal", operator="between", formula1="0", formula2="4", allow_blank=True)
         score_validation.errorStyle = "stop"
         score_validation.showErrorMessage = True
@@ -178,13 +185,13 @@ def build_cw_sheet_template(ws, source_path, students):
     source = source_wb.worksheets[0]
     ws["K1"] = "CW"
     ws["K1"].font = Font(bold=True, color=NAVY)
-    ws["K2"] = "Попытка — номер текущей сдачи"
-    ws["K2"].font = Font(italic=True, color="666666")
+    ws["K2"] = None
 
-    section_starts = []
+    all_section_starts = []
     for row in range(1, source.max_row + 1):
         if source.cell(row, 4).value and source.cell(row, 1).value is None and source.cell(row, 3).value is None:
-            section_starts.append(row)
+            all_section_starts.append(row)
+    section_starts = [row for row in all_section_starts if str(source.cell(row, 4).value).strip() in ("КР-1", "КР-2")]
 
     output_row = 1
     for start in section_starts:
@@ -219,7 +226,14 @@ def build_cw_sheet_template(ws, source_path, students):
                 ws.cell(row, col).fill = PatternFill("solid", fgColor=INPUT)
                 ws.cell(row, col).protection = Protection(locked=False)
         body_style(ws, first_student, last_student, 1, 11)
-        add_validation(ws, f"B{first_student}:B{last_student}", "1,2,3,4", "Укажите номер попытки от 1 до 4")
+        attempt_validation = DataValidation(type="whole", operator="between", formula1="1", formula2="4", allow_blank=True)
+        attempt_validation.errorStyle = "stop"
+        attempt_validation.showErrorMessage = True
+        attempt_validation.error = "Введите целое число от 1 до 4"
+        ws.add_data_validation(attempt_validation)
+        attempt_validation.add(f"B{first_student}:B{last_student}")
+        for attempt_row in range(first_student, last_student + 1):
+            ws.cell(attempt_row, 2).number_format = "0"
         score_validation = DataValidation(type="decimal", operator="between", formula1="0", formula2="4", allow_blank=True)
         score_validation.errorStyle = "stop"
         score_validation.showErrorMessage = True
@@ -238,48 +252,39 @@ def build_cw_sheet_template(ws, source_path, students):
 
 
 def build_ladder_sheet(ws):
-    title(ws, "Логи D", "Служебный журнал выходов. Записи добавляются автоматически, когда практик заменяет + на 1 в верхнем плюсовике.", 10)
-    ws["A3"] = "Практик (1 Артём / 2 Рами / 3 Немат)"
-    ws["B3"] = 1
-    ws["C3"] = "Студент"
-    ws["D3"] = ""
-    ws["E3"] = "Задача"
-    ws["F3"] = ""
-    ws["G3"] = "Практика"
-    ws["H3"] = 2
-    ws["I3"] = "Разрешить выход после 15"
-    ws["J3"] = "Нет"
-    for col in [2, 4, 6, 8, 10]:
-        ws.cell(3, col).fill = PatternFill("solid", fgColor="FFF2CC")
-        ws.cell(3, col).protection = Protection(locked=False)
-    ws["A4"] = "Кнопка учитывает только задачи, где у студента стоит + в таблице выбранной практики, и не выдаёт больше двух выходов за одну практику. После 15 выходов требуется явное разрешение."
-    ws.merge_cells("A4:J4")
-    ws["A4"].alignment = Alignment(wrap_text=True)
-    ws.row_dimensions[4].height = 32
-    headers = ["Практика", "Практикант", "Студент", "Задача", "Номер выхода", "База D", "Коэффициент", "Начислено D", "Статус", "Поправка"]
+    title(ws, "Логи D", "", 11)
+    headers = ["ФИО", "Практик", "Практика", "Задача", "Номер выхода", "База D", "Коэффициент", "Начислено D", "Статус", "Поправка", "Дата"]
     for col, value in enumerate(headers, start=1):
-        ws.cell(6, col, value)
-    header_style(ws, 6, 10)
-    for row in range(7, 3007):
-        ws.cell(row, 5, f'=IF(C{row}="","",COUNTIF($C$7:C{row},C{row}))')
+        ws.cell(3, col, value)
+    header_style(ws, 3, 11)
+    for row in range(4, 3007):
+        ws.cell(row, 5, f'=IF(A{row}="","",COUNTIFS($A$4:A{row},A{row},$I$4:I{row},"<>Штраф -2",$I$4:I{row},"<>ушел на базу"))')
         ws.cell(row, 6, f'=IF(E{row}="","",IF(E{row}<=3,6,IF(E{row}<=6,5,IF(E{row}<=9,4,IF(E{row}<=12,3,IF(E{row}<=15,2,0))))))')
-        ws.cell(row, 8, f'=IF(OR(F{row}="",G{row}=""),"",F{row}*G{row}+IF(J{row}="",0,J{row}))')
-        for col in [1, 2, 3, 4, 7, 9, 10]:
+        ws.cell(row, 8, f'=IF(I{row}="Штраф -2",-2,IF(OR(F{row}="",G{row}=""),"",F{row}*G{row}+IF(J{row}="",0,J{row})))')
+        for col in [1, 2, 3, 4, 7, 9, 10, 11]:
             ws.cell(row, col).fill = PatternFill("solid", fgColor=INPUT)
             ws.cell(row, col).protection = Protection(locked=False)
-    body_style(ws, 7, 3006, 1, 10)
-    add_validation(ws, "B3", "1,2,3", "Выберите практиканта 1, 2 или 3")
-    add_validation(ws, "J3", "Нет,Да", "Выберите Нет или Да")
-    for col in ["H3"]:
-        ws[col].data_type = "n"
-    ws.freeze_panes = "A7"
+    body_style(ws, 4, 3006, 1, 11)
+    ws.freeze_panes = "A4"
     ws.sheet_view.showGridLines = False
-    for col, width in {"A": 12, "B": 15, "C": 27, "D": 16, "E": 14, "F": 10, "G": 14, "H": 14, "I": 24, "J": 12}.items():
+    for col, width in {"A": 12, "B": 15, "C": 27, "D": 16, "E": 14, "F": 10, "G": 14, "H": 14, "I": 24, "J": 12, "K": 18}.items():
         ws.column_dimensions[col].width = width
     for col in ["L", "M", "N", "O"]:
         ws.column_dimensions[col].hidden = True
-    ws.row_dimensions[3].hidden = True
-    ws.row_dimensions[4].hidden = True
+
+
+def build_ranking_sheet(ws):
+    title(ws, "Общий рейтинг", "", 9)
+    headers = ["Практик", "ФИО", "TG", "Прод", "D", "CW", "Тир", "Экзамен", "Комментарий"]
+    for col, value in enumerate(headers, start=1):
+        ws.cell(3, col, value)
+    header_style(ws, 3, 9)
+    body_style(ws, 4, 93, 1, 9)
+    ws.freeze_panes = "A4"
+    ws.sheet_view.showGridLines = False
+    for col, width in {"A": 12, "B": 27, "C": 22, "D": 10, "E": 10, "F": 10, "G": 12, "H": 22, "I": 30}.items():
+        ws.column_dimensions[col].width = width
+    ws.protection.sheet = False
 
 
 def build_plus_sheet(ws, practitioner, roster, task_labels, task_values, result_values, common_config_ref, practitioner_no):
@@ -321,13 +326,14 @@ def build_plus_sheet(ws, practitioner, roster, task_labels, task_values, result_
             ws.cell(row, 1, name)
             ws.cell(row, 2, tg)
             ws.cell(row, 3, f'=IF(A{row}="","",COUNTIF(F{row}:AI{row},"+")+COUNTIF(F{row}:AI{row},"1"))')
-            ws.cell(row, 4, f'=IF(A{row}="","",IF(C{row}>2*COUNTA(F${plus_header}:AI${plus_header})/3,\'Общий\'!$M$11,IF(C{row}>=COUNTA(F${plus_header}:AI${plus_header})/2,\'Общий\'!$M$12,\'Общий\'!$M$13)))')
-            ws.cell(row, 5, f'=IF(A{row}="","",SUMIFS(\'Логи\'!$H$7:$H$3006,\'Логи\'!$A$7:$A$3006,{practice_no},\'Логи\'!$B$7:$B$3006,{practitioner_no},\'Логи\'!$C$7:$C$3006,A{row}))')
+            ws.cell(row, 4, f'=IF(A{row}="","",IF(C{row}>2*COUNTA(F${plus_header}:AI${plus_header})/3,1,IF(C{row}>=COUNTA(F${plus_header}:AI${plus_header})/2,0.8,0.5)))')
+            ws.cell(row, 5, f'=IF(A{row}="","",SUMIFS(\'Логи\'!$H$4:$H$3006,\'Логи\'!$A$4:$A$3006,A{row},\'Логи\'!$C$4:$C$3006,{practice_no}))')
             for col in range(6, end_task_col + 1):
                 ws.cell(row, col).fill = PatternFill("solid", fgColor=INPUT)
                 ws.cell(row, col).protection = Protection(locked=False)
+                ws.cell(row, col).number_format = "@"
         body_style(ws, plus_first, plus_last, 1, end_task_col)
-        add_validation(ws, f"F{plus_first}:AI{plus_last}", "+,1", "Студент ставит +; практик может поставить 1")
+        add_validation(ws, f"F{plus_first}:AI{plus_last}", "+,1,-", "Студент ставит +; практик может поставить 1 или -")
         ws.conditional_formatting.add(f"C{plus_first}:C{plus_last}", CellIsRule(operator="greaterThanOrEqual", formula=["21"], fill=PatternFill("solid", fgColor=GREEN)))
         ws.conditional_formatting.add(f"C{plus_first}:C{plus_last}", CellIsRule(operator="between", formula=["15", "20"], fill=PatternFill("solid", fgColor="A9D18E")))
         ws.conditional_formatting.add(f"C{plus_first}:C{plus_last}", CellIsRule(operator="lessThan", formula=["15"], fill=PatternFill("solid", fgColor=LIGHT_GREEN)))
@@ -353,6 +359,7 @@ def build_plus_sheet(ws, practitioner, roster, task_labels, task_values, result_
             for col in range(6, end_task_col + 1):
                 ws.cell(row, col).fill = PatternFill("solid", fgColor=INPUT)
                 ws.cell(row, col).protection = Protection(locked=False)
+                ws.cell(row, col).number_format = "@"
         body_style(ws, result_first, result_last, 1, end_task_col)
         add_validation(ws, f"F{result_first}:AI{result_last}", "1,-", "Практик может ввести только 1, - или оставить пусто")
         color_plus_sheet(ws, result_header, result_first, result_last, 6, end_task_col)
@@ -381,9 +388,9 @@ def build():
     wb.remove(wb.active)
 
     common = wb.create_sheet("Общий")
-    title(common, "Дискретная математика — общий лист", "Здесь хранится общий список студентов и итоговые результаты по трём практикам.", 13)
-    common.append(["Практик", "Имя", "TG", "Активен", "D", "CW", "Тир", "Экзамен", "Оценка по таблице", "Финальная оценка", "Комментарий"])
-    header_style(common, 3, 11)
+    title(common, "Дискретная математика — общий лист", "", 9)
+    common.append(["Практик", "ФИО", "TG", "Прод", "D", "CW", "Тир", "Экзамен", "Комментарий"])
+    header_style(common, 3, 9)
     students = [("Артём", name, tg) for name, tg in roster]
     students += [("Артём", "", "")] * max(0, 30 - len(roster))
     students += [("Рами", "", "")] * 30
@@ -394,37 +401,29 @@ def build():
         common.cell(row, 2, name)
         common.cell(row, 3, tg)
         common.cell(row, 4, "Да")
-        common.cell(row, 5, f'=IF(B{row}="","",SUMIF(\'Логи\'!$C$7:$C$3006,B{row},\'Логи\'!$H$7:$H$3006))')
-        common.cell(row, 7, f'=IF(B{row}="","",IF(AND(E{row}>=$M$7,F{row}>=$M$8),"S",IF(AND(E{row}>=$M$5,F{row}>=$M$6),"A",IF(E{row}>=$M$4,"B","Допса"))))')
-        for col in [4, 5, 6, 8, 9, 10, 11]:
+        common.cell(row, 5, f'=IF(B{row}="","",SUMIF(\'Логи\'!$A$4:$A$3006,B{row},\'Логи\'!$H$4:$H$3006))')
+        common.cell(row, 6, f'=IF(B{row}="","",SUMIF(\'CW\'!$A:$A,B{row},\'CW\'!$D:$D))')
+        common.cell(row, 7, f'=IF(B{row}="","",IF(AND(E{row}>=55,F{row}>=24),"S",IF(AND(E{row}>=35,F{row}>=14),"A",IF(E{row}>=17,"B","Допса"))))')
+        for col in [1, 4, 5, 6, 8, 9]:
             common.cell(row, col).protection = Protection(locked=False)
             common.cell(row, col).fill = PatternFill("solid", fgColor=INPUT)
-    body_style(common, 4, 93, 1, 11)
+    body_style(common, 4, 93, 1, 9)
+    add_validation(common, "A4:A93", "Артём,Рами,Немат", "Выберите практика")
     add_validation(common, "D4:D93", "Да,Нет", "Выберите статус студента: Да или Нет")
     add_validation(common, "H4:H93", "неуд,уд,хорошо,очень хорошо", "Выберите категорию экзамена")
-    common["L3"] = "Порог"
-    common["M3"] = "Значение"
-    config = [
-        ("Тир B: D", 17), ("Тир A: D", 35), ("Тир A: CW", 14),
-        ("Тир S: D", 55), ("Тир S: CW", 24), ("Правило коэффициента 1", "> 2x/3"),
-        ("Правило коэффициента 0.8", ">= x/2"), ("Коэффициент 1", 1),
-        ("Коэффициент 0.8", 0.8), ("Коэффициент 0.5", 0.5),
-    ]
-    for row, (label, value) in enumerate(config, start=4):
-        common.cell(row, 12, label)
-        common.cell(row, 13, value)
-    header_style(common, 3, 13)
-    body_style(common, 4, 13, 12, 13)
+    header_style(common, 3, 9)
     common.freeze_panes = "D4"
-    common.auto_filter.ref = "A3:K93"
+    common.auto_filter.ref = "A3:I93"
     common.sheet_view.showGridLines = False
-    for col, width in {"A": 12, "B": 27, "C": 22, "D": 10, "E": 10, "F": 10, "G": 12, "H": 22, "I": 22, "J": 18, "K": 30, "L": 25, "M": 12}.items():
+    for col, width in {"A": 12, "B": 27, "C": 22, "D": 10, "E": 10, "F": 10, "G": 12, "H": 22, "I": 30}.items():
         common.column_dimensions[col].width = width
-    common.protection.sheet = True
-    common.protection.password = "common"
+    # Лист намеренно не защищён: практик должен менять группы, Прод и экзамен.
+    common.protection.sheet = False
 
     cw = wb.create_sheet("CW")
     build_cw_sheet_template(cw, SOURCE, [(name, tg) for _practitioner, name, tg in all_students])
+    ranking = wb.create_sheet("Рейтинг")
+    build_ranking_sheet(ranking)
     ladder = wb.create_sheet("Логи")
     build_ladder_sheet(ladder)
 
