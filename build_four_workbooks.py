@@ -118,20 +118,22 @@ def add_validation(ws, cell_range, values, message, kind="list"):
     validation.add(cell_range)
 
 
-def color_tasks(ws, header_row, first_row, last_row):
-    for col in range(6, 36):
+def color_tasks(ws, header_row, first_row, last_row, task_first_col=6, task_last_col=35):
+    first_letter = get_column_letter(task_first_col)
+    last_letter = get_column_letter(task_last_col)
+    for col in range(task_first_col, task_last_col + 1):
         ws.cell(header_row, col).fill = PatternFill("solid", fgColor="FFF2CC")
         ws.cell(header_row, col).font = Font(bold=True, color="000000")
     ws.conditional_formatting.add(
-        f"F{header_row}:AI{header_row}",
+        f"{first_letter}{header_row}:{last_letter}{header_row}",
         FormulaRule(
-            formula=[f'COUNTIF(F${first_row}:F${last_row},"1")>0'],
+            formula=[f'COUNTIF({first_letter}${first_row}:{first_letter}${last_row},"1")>0'],
             fill=PatternFill("solid", fgColor=ONE_GREEN),
             font=Font(bold=True, color=WHITE),
         ),
     )
-    rng = f"F{first_row}:AI{last_row}"
-    anchor = f"F{first_row}"
+    rng = f"{first_letter}{first_row}:{last_letter}{last_row}"
+    anchor = f"{first_letter}{first_row}"
     ws.conditional_formatting.add(rng, FormulaRule(
         formula=[f'{anchor}="+"'], fill=PatternFill("solid", fgColor=PLUS_GREEN), font=Font(color="000000")))
     ws.conditional_formatting.add(rng, FormulaRule(
@@ -341,6 +343,16 @@ def make_plus(path, practitioner, index):
     ws.title = "Практика 1"
     roster = [(f"Студент{index}.{i}", "") for i in range(1, STUDENTS + 1)]
     labels = [str(i) for i in range(1, TASKS + 1)]
+    has_presence = practitioner != "Рами"
+    presence_col = 2 if has_presence else None
+    s_col = 3 if has_presence else 2
+    coefficient_col = 4 if has_presence else 3
+    total_col = 5 if has_presence else 4
+    task_first_col = 6 if has_presence else 5
+    task_last_col = task_first_col + TASKS - 1
+    task_first_letter = get_column_letter(task_first_col)
+    task_last_letter = get_column_letter(task_last_col)
+    end_col = task_last_col
     for practice in range(1, PRACTICES + 1):
         if practice > 1:
             ws = wb.create_sheet(f"Практика {practice}")
@@ -350,34 +362,52 @@ def make_plus(path, practitioner, index):
         ws.cell(1, 1, f"Практика {practice} — плюсы")
         ws.cell(1, 1).font = Font(size=14, bold=True, color=NAVY)
         ws.cell(1, 1).fill = PatternFill("solid", fgColor="D9D9D9")
-        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=35)
-        for col, value in enumerate(["ФИО", "Присутствие", "S", "Коэффициент", "D за практику"] + labels, 1):
+        ws.merge_cells(start_row=1, start_column=1, end_row=1, end_column=end_col)
+        fixed_headers = ["ФИО"]
+        if has_presence:
+            fixed_headers.append("Присутствие")
+        fixed_headers += ["S", "Коэффициент", "D за практику"]
+        for col, value in enumerate(fixed_headers + labels, 1):
             ws.cell(header, col, value)
-        header_style(ws, header, 35)
-        for col, fill in [(1, "A9D18E"), (2, "D9EAD3"), (3, "F4B183"), (4, "FFF2CC"), (5, "D9EAD3")]:
+        header_style(ws, header, end_col)
+        fixed_fills = [(1, "A9D18E")]
+        if has_presence:
+            fixed_fills.append((presence_col, "D9EAD3"))
+        fixed_fills += [(s_col, "F4B183"), (coefficient_col, "FFF2CC"), (total_col, "D9EAD3")]
+        for col, fill in fixed_fills:
             ws.cell(header, col).fill = PatternFill("solid", fgColor=fill)
             ws.cell(header, col).font = Font(bold=True, color="000000")
-        add_validation(ws, f"B{first}:B{last}", "Да,Нет", "Выберите Да или Нет")
+        if has_presence:
+            add_validation(ws, f"B{first}:B{last}", "Да,Нет", "Выберите Да или Нет")
         for row, (name, tg) in enumerate(roster, first):
             ws.cell(row, 1, name)
-            ws.cell(row, 3, f'=IF(A{row}="","",COUNTIF(F{row}:AI{row},"+")+COUNTIF(F{row}:AI{row},"1"))')
-            ws.cell(row, 4, f'=IF(A{row}="","",IF(C{row}>2*COUNTA(F${header}:AI${header})/3,1,IF(C{row}>=COUNTA(F${header}:AI${header})/2,0.8,0.5)))')
-            for col in range(6, 36):
+            s_letter = get_column_letter(s_col)
+            ws.cell(row, s_col, f'=IF(A{row}="","",COUNTIF({task_first_letter}{row}:{task_last_letter}{row},"+")+COUNTIF({task_first_letter}{row}:{task_last_letter}{row},"1"))')
+            ws.cell(row, coefficient_col, f'=IF(A{row}="","",IF({s_letter}{row}>2*COUNTA({task_first_letter}${header}:{task_last_letter}${header})/3,1,IF({s_letter}{row}>=COUNTA({task_first_letter}${header}:{task_last_letter}${header})/2,0.8,0.5)))')
+            for col in range(task_first_col, task_last_col + 1):
                 ws.cell(row, col).number_format = "@"
                 ws.cell(row, col).protection = Protection(locked=False)
                 ws.cell(row, col).fill = PatternFill("solid", fgColor=INPUT)
-        body_style(ws, first, last, 1, 35)
-        align_right(ws, first, last, [1, 3, 4, 5] + list(range(6, 36)))
-        align_center(ws, first, last, [2])
-        color_tasks(ws, header, first, last)
-        ws.conditional_formatting.add(f"C{first}:C{last}", CellIsRule(operator="greaterThanOrEqual", formula=["21"], fill=PatternFill("solid", fgColor="70AD47")))
-        ws.conditional_formatting.add(f"C{first}:C{last}", CellIsRule(operator="between", formula=["15", "20"], fill=PatternFill("solid", fgColor="A9D18E")))
-        ws.conditional_formatting.add(f"C{first}:C{last}", CellIsRule(operator="lessThan", formula=["15"], fill=PatternFill("solid", fgColor="E2F0D9")))
-        ws.freeze_panes = "F4"
+        body_style(ws, first, last, 1, end_col)
+        align_right(ws, first, last, [1, s_col, coefficient_col, total_col] + list(range(task_first_col, task_last_col + 1)))
+        if has_presence:
+            align_center(ws, first, last, [presence_col])
+        color_tasks(ws, header, first, last, task_first_col, task_last_col)
+        s_letter = get_column_letter(s_col)
+        ws.conditional_formatting.add(f"{s_letter}{first}:{s_letter}{last}", CellIsRule(operator="greaterThanOrEqual", formula=["21"], fill=PatternFill("solid", fgColor="70AD47")))
+        ws.conditional_formatting.add(f"{s_letter}{first}:{s_letter}{last}", CellIsRule(operator="between", formula=["15", "20"], fill=PatternFill("solid", fgColor="A9D18E")))
+        ws.conditional_formatting.add(f"{s_letter}{first}:{s_letter}{last}", CellIsRule(operator="lessThan", formula=["15"], fill=PatternFill("solid", fgColor="E2F0D9")))
+        ws.freeze_panes = f"{task_first_letter}4"
         ws.sheet_view.showGridLines = False
-        for col, width in {"A": 27, "B": 14, "C": 9, "D": 14, "E": 14}.items():
+        fixed_widths = {"A": 27}
+        if has_presence:
+            fixed_widths["B"] = 14
+        fixed_widths[get_column_letter(s_col)] = 9
+        fixed_widths[get_column_letter(coefficient_col)] = 14
+        fixed_widths[get_column_letter(total_col)] = 14
+        for col, width in fixed_widths.items():
             ws.column_dimensions[col].width = width
-        for col in range(6, 36):
+        for col in range(task_first_col, task_last_col + 1):
             ws.column_dimensions[get_column_letter(col)].width = 10
         ws.protection.sheet = False
     make_plus_logs(wb)

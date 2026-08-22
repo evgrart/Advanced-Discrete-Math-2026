@@ -26,6 +26,25 @@ const DM = {
   logMaxRow: 3006
 };
 
+function plusLayout_(practitioner) {
+  if (practitioner === 'Рами') {
+    return {
+      presenceCol: 0,
+      coefficientCol: 3,
+      totalCol: 4,
+      taskFirstCol: 5,
+      taskLastCol: 34
+    };
+  }
+  return {
+    presenceCol: 2,
+    coefficientCol: DM.plusCoefficientCol,
+    totalCol: DM.plusTotalCol,
+    taskFirstCol: DM.taskFirstCol,
+    taskLastCol: DM.taskLastCol
+  };
+}
+
 function onOpen() {
   SpreadsheetApp.getUi()
     .createMenu('DM система')
@@ -96,7 +115,8 @@ function handlePlusEdit_(event, practitioner) {
   const cell = event.range;
   const row = cell.getRow();
   const col = cell.getColumn();
-  if (col < DM.taskFirstCol || col > DM.taskLastCol) return;
+  const layout = plusLayout_(practitioner);
+  if (col < layout.taskFirstCol || col > layout.taskLastCol) return;
   cell.clearNote();
 
   const practiceNo = practiceFromSheet_(sheet);
@@ -182,7 +202,8 @@ function appendNormalLog_(central, plusFile, plusSheet, practitionerNo,
   const plusFirst = DM.plusFirstRow;
   const studentRow = findStudentRow_(plusSheet, studentName, plusFirst, plusFirst + DM.studentsPerGroup - 1);
   if (!studentRow) return { ok: false, message: 'Студент не найден в файле практика.' };
-  const coefficient = Number(plusSheet.getRange(studentRow, DM.plusCoefficientCol).getValue()) || 0.5;
+  const layout = plusLayout_(practitioner);
+  const coefficient = Number(plusSheet.getRange(studentRow, layout.coefficientCol).getValue()) || 0.5;
   const exitNo = studentExit + 1;
   const base = ladderPoints_(exitNo);
   const newRow = Math.max(findLastLogRow_(logs) + 1, DM.logFirstRow);
@@ -373,13 +394,16 @@ function syncGroups_() {
       const fileId = DM.plusFileIds[practitioner];
       if (!fileId) return;
       const file = SpreadsheetApp.openById(fileId);
+      const layout = plusLayout_(practitioner);
       for (let practice = 1; practice <= DM.practiceCount; practice++) {
         const sheet = getPlusSheet_(file, practice);
         if (!sheet) continue;
         const first = DM.plusFirstRow;
         sheet.getRange(first, 1, DM.studentsPerGroup, 1).clearContent();
-        sheet.getRange(first, 2, DM.studentsPerGroup, 1).clearContent();
-        sheet.getRange(first, DM.taskFirstCol, DM.studentsPerGroup, 30).clearContent();
+        if (layout.presenceCol) {
+          sheet.getRange(first, layout.presenceCol, DM.studentsPerGroup, 1).clearContent();
+        }
+        sheet.getRange(first, layout.taskFirstCol, DM.studentsPerGroup, 30).clearContent();
         groups[index].slice(0, DM.studentsPerGroup).forEach((student, offset) => {
           const row = first + offset;
           sheet.getRange(row, 1).setValue(student.name);
@@ -389,8 +413,10 @@ function syncGroups_() {
               ? snapshots.bySlot[practitioner][practice][offset]
               : null;
           if (saved) {
-            sheet.getRange(row, 2).setValue(saved.presence);
-            sheet.getRange(row, DM.taskFirstCol, 1, 30).setValues([saved.tasks]);
+            if (layout.presenceCol) {
+              sheet.getRange(row, layout.presenceCol).setValue(saved.presence);
+            }
+            sheet.getRange(row, layout.taskFirstCol, 1, 30).setValues([saved.tasks]);
           }
         });
       }
@@ -433,24 +459,25 @@ function collectSnapshots_() {
     const fileId = DM.plusFileIds[practitioner];
     if (!fileId) return;
     const file = SpreadsheetApp.openById(fileId);
+    const layout = plusLayout_(practitioner);
     for (let practice = 1; practice <= DM.practiceCount; practice++) {
       const sheet = getPlusSheet_(file, practice);
       if (!sheet) continue;
       const first = DM.plusFirstRow;
-      const rows = sheet.getRange(first, 1, DM.studentsPerGroup, 35).getValues();
+      const rows = sheet.getRange(first, 1, DM.studentsPerGroup, layout.taskLastCol).getValues();
       snapshots.bySlot[practitioner] = snapshots.bySlot[practitioner] || {};
       snapshots.bySlot[practitioner][practice] = [];
       rows.forEach(row => {
         const name = String(row[0] == null ? '' : row[0]).trim();
         snapshots.bySlot[practitioner][practice].push({
-          presence: row[1],
-          tasks: row.slice(5, 35)
+          presence: layout.presenceCol ? row[layout.presenceCol - 1] : '',
+          tasks: row.slice(layout.taskFirstCol - 1, layout.taskLastCol)
         });
         if (!name) return;
         snapshots.byName[name] = snapshots.byName[name] || {};
         snapshots.byName[name][practice] = {
-          presence: row[1],
-          tasks: row.slice(5, 35)
+          presence: layout.presenceCol ? row[layout.presenceCol - 1] : '',
+          tasks: row.slice(layout.taskFirstCol - 1, layout.taskLastCol)
         };
       });
     }
@@ -497,13 +524,14 @@ function refreshPlusTotals_(central) {
     const fileId = DM.plusFileIds[practitioner];
     if (!fileId) return;
     const file = SpreadsheetApp.openById(fileId);
+    const layout = plusLayout_(practitioner);
     for (let practice = 1; practice <= DM.practiceCount; practice++) {
       const sheet = getPlusSheet_(file, practice);
       if (!sheet) continue;
       const first = DM.plusFirstRow;
       const names = sheet.getRange(first, 1, DM.studentsPerGroup, 1).getDisplayValues();
       const values = names.map(row => [row[0] ? (totals[row[0].trim() + '|' + practice] || 0) : '']);
-      sheet.getRange(first, DM.plusTotalCol, DM.studentsPerGroup, 1).setValues(values);
+      sheet.getRange(first, layout.totalCol, DM.studentsPerGroup, 1).setValues(values);
     }
   });
 }
@@ -513,11 +541,12 @@ function clearPlusNotes_() {
     const fileId = DM.plusFileIds[practitioner];
     if (!fileId) return;
     const file = SpreadsheetApp.openById(fileId);
+    const layout = plusLayout_(practitioner);
     for (let practice = 1; practice <= DM.practiceCount; practice++) {
       const sheet = getPlusSheet_(file, practice);
       if (!sheet) continue;
-      sheet.getRange(DM.plusFirstRow, DM.taskFirstCol,
-        DM.studentsPerGroup, DM.taskLastCol - DM.taskFirstCol + 1).clearNote();
+      sheet.getRange(DM.plusFirstRow, layout.taskFirstCol,
+        DM.studentsPerGroup, layout.taskLastCol - layout.taskFirstCol + 1).clearNote();
     }
   });
 }
@@ -528,13 +557,14 @@ function refreshLogCoefficients_(central) {
     const fileId = DM.plusFileIds[practitioner];
     if (!fileId) return;
     const file = SpreadsheetApp.openById(fileId);
+    const layout = plusLayout_(practitioner);
     for (let practice = 1; practice <= DM.practiceCount; practice++) {
       const sheet = getPlusSheet_(file, practice);
       if (!sheet) continue;
-      sheet.getRange(DM.plusFirstRow, 1, DM.studentsPerGroup, DM.plusCoefficientCol)
+      sheet.getRange(DM.plusFirstRow, 1, DM.studentsPerGroup, layout.coefficientCol)
         .getValues().forEach(row => {
           const name = String(row[0] == null ? '' : row[0]).trim();
-          if (name) coefficients[name + '|' + practice] = Number(row[DM.plusCoefficientCol - 1]) || 0.5;
+          if (name) coefficients[name + '|' + practice] = Number(row[layout.coefficientCol - 1]) || 0.5;
         });
     }
   });
@@ -580,18 +610,19 @@ function reconcilePlusResults_(central) {
     const fileId = DM.plusFileIds[practitioner];
     if (!fileId) return;
     const file = SpreadsheetApp.openById(fileId);
+    const layout = plusLayout_(practitioner);
     for (let practice = 1; practice <= DM.practiceCount; practice++) {
       const sheet = getPlusSheet_(file, practice);
       if (!sheet) continue;
-      const headers = sheet.getRange(DM.plusHeaderRow, DM.taskFirstCol, 1,
-        DM.taskLastCol - DM.taskFirstCol + 1).getDisplayValues()[0];
+      const headers = sheet.getRange(DM.plusHeaderRow, layout.taskFirstCol, 1,
+        layout.taskLastCol - layout.taskFirstCol + 1).getDisplayValues()[0];
       const rows = sheet.getRange(DM.plusFirstRow, 1, DM.studentsPerGroup,
-        DM.taskLastCol).getDisplayValues();
+        layout.taskLastCol).getDisplayValues();
       rows.forEach(row => {
         const student = String(row[0]).trim();
         if (!student) return;
         headers.forEach((task, offset) => {
-          const value = String(row[DM.taskFirstCol - 1 + offset]).trim();
+          const value = String(row[layout.taskFirstCol - 1 + offset]).trim();
           if (value !== '1' && value !== '-') return;
           const key = [student, practitioner, practice, task].join('|');
           if (value === '1') {
