@@ -47,12 +47,15 @@ function plusLayout_(practitioner) {
 }
 
 function onOpen() {
-  SpreadsheetApp.getUi()
-    .createMenu('DM система')
+  const ui = SpreadsheetApp.getUi();
+  const menu = ui.createMenu('DM система')
     .addItem('Настроить 4 файла', 'installDmSystem')
     .addItem('Синхронизировать группы', 'syncGroups_')
-    .addItem('Синхронизировать таблицу', 'syncTable')
-    .addToUi();
+    .addItem('Синхронизировать таблицу', 'syncTable');
+  if (typeof telegramMenu_ === 'function') {
+    menu.addSubMenu(telegramMenu_(ui));
+  }
+  menu.addToUi();
 }
 
 function installDmSystem() {
