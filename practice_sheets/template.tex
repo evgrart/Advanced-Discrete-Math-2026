@@ -1,1 +1,86 @@
+﻿\documentclass[12pt,a4paper]{article}
+\usepackage{amsmath,amsthm,amssymb}
+\usepackage[mathscr]{eucal}
+\usepackage[T2A]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[russian]{babel}
 
+\oddsidemargin=-17.4mm
+\textwidth=190mm
+\headheight=0pt
+\headsep=0pt
+\topmargin=-5.4mm
+\textheight=257mm
+
+\pagestyle{plain}
+
+\sloppy
+\righthyphenmin=2
+\exhyphenpenalty=10000
+
+\def\ds{\displaystyle}
+\def\ss{\scriptstyle}
+\def\q#1.{{\bf #1.}}
+\def\N{\mathbb N}
+\def\Z{\mathbb Z}
+\def\Q{\mathbb Q}
+\def\R{\mathbb R}
+\def\Pp{\mathbb P}
+\def\C{{\mathbb C}}
+\def\Cc{{\rm C}}
+\def\eps{{\varepsilon}}
+\def\vec{\overrightarrow}
+\def\ov{\overline}
+\def\mmax{\mathop{\rm max}\limits}
+\def\ord{\rm ord}
+\def\amp{\mathbin\&}
+
+\DeclareMathOperator{\Ker}{Ker}
+\DeclareMathOperator{\Ima}{Im}
+\DeclareMathOperator{\Int}{Int}
+\DeclareMathOperator{\Cl}{Cl}
+
+\newcounter{problem}
+\newcounter{partproblem}
+\newcommand{\sheettitle}[1]{
+  \begin{center}
+    \large\bf Серия \SheetNo. #1
+  \end{center}
+  \medskip
+}
+\newenvironment{problems}{
+  \begin{list}{\arabic{problem}.}{
+    \usecounter{problem}
+    \labelwidth=9mm
+    \labelsep=5mm
+    \leftmargin=14mm
+    \rightmargin=0mm
+    \topsep=0mm
+    \partopsep=0mm
+    \itemsep=5mm
+    \parsep=0mm
+    \listparindent=0mm
+    \itemindent=0mm
+    \def\makelabel##1{\hss\bf ##1}
+  }
+}{
+  \end{list}
+}
+\newenvironment{parts}{
+  \begin{list}{\alph{partproblem})}{
+    \usecounter{partproblem}
+    \labelwidth=6mm
+    \labelsep=3mm
+    \leftmargin=12mm
+    \rightmargin=0mm
+    \topsep=0mm
+    \partopsep=0mm
+    \itemsep=0.5mm
+    \parsep=0mm
+    \listparindent=0mm
+    \itemindent=0mm
+    \def\makelabel##1{\hss ##1}
+  }
+}{
+  \end{list}
+}
