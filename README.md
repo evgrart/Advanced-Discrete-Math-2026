@@ -7,6 +7,8 @@
 - [Итоговая таблица](https://docs.google.com/spreadsheets/d/1PlidYIZE5Srt-lv10Q8tFkrb36xj8xa2GwSiI7fmzXY/edit?gid=2140798235#gid=2140798235)
 - [Практики и листочки](https://github.com/evgrart/Advanced-Discrete-Math-2026/tree/main/practice_sheets)
 - [Литература](https://github.com/evgrart/Advanced-Discrete-Math-2026/tree/main/literature)
+- [Материалы Карпова ДВ] (https://logic.pdmi.ras.ru/~dvk/ITMO/)
+- [Материалы Пастора АВ] (https://logic.pdmi.ras.ru/~dvk/ITMO/)
 
 ### Преподаватели
 
