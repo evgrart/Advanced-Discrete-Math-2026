@@ -8,7 +8,7 @@
 - [Практики и листочки](https://github.com/evgrart/Advanced-Discrete-Math-2026/tree/main/practice_sheets)
 - [Литература](https://github.com/evgrart/Advanced-Discrete-Math-2026/tree/main/literature)
 - [Материалы Карпова ДВ](https://logic.pdmi.ras.ru/~dvk/ITMO/)
-- [Материалы Пастора АВ](https://logic.pdmi.ras.ru/~dvk/ITMO/)
+- [Материалы Пастора АВ](https://logic.pdmi.ras.ru/~pastor/ITMO/)
 - [Описание системы оценивания](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/intro/guide.md)
 
 ### Преподаватели
