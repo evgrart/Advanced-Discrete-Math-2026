@@ -24,11 +24,15 @@
 
 ## Курс
 
-### Практика 1. Intro | [ser-1](URL)
+### Практика 1. Intro | [ser-1](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/practice_sheets/ser1.pdf)
 
 > Знакомство и правила курса. Популярные сюжеты в задачах и методы доказательства.
 
-Может пригодиться:
+Материалы:
 
-+ [Верещагин. Шень. Начала теории множеств.](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/literature/Vereschagin_N_K_-_Chast_1_Nachala_teorii_mnozhestv_-_2012.pdf)
-
++ [Успенский. Простейшие примеры математических доказательств.](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/literature/book.34-2.pdf)
+> Советуем начать с нее, чтобы еще раз просмотреть все популярные подходы в доказательствах.
++ [Шень. Математическая индукция](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/literature/shen-induction.pdf)
+> Отличная методичка по математической индукции, много примеров.
++ [Генкин. Итенберг. Фомин. Ленинградские математические кружки](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/literature/%D0%9B%D0%95%D0%9D%D0%98%D0%9D%D0%93%D0%A0%D0%90%D0%94%D0%A1%D0%9A%D0%98%D0%95%20%D0%9C%D0%90%D0%A2%D0%95%D0%9C%D0%90%D0%A2%D0%98%D0%A7%D0%95%D0%A1%D0%9A%D0%98%D0%95%20%D0%9A%D0%A0%D0%A3%D0%96%D0%9A%D0%98.pdf)
+> Классическая олимпиадная книжка. Много хороших задачек на все те темы и методы, которые мы успели посмотреть на практике. Особенно полезны будут разделы про четность, инвариант и принцип Дирихле.
