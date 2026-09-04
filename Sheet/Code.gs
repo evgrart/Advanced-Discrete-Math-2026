@@ -227,12 +227,16 @@ function renameStudentEverywhere_(central, oldName, newName, practitioner, known
   const common = central.getSheetByName(DM.common);
   const commonRows = common.getRange(DM.commonFirstRow, 1, DM.commonLastRow - DM.commonFirstRow + 1, 2).getDisplayValues();
   let sourceIndex = -1;
-  commonRows.forEach((row, index) => {
-    if (sourceIndex < 0 && String(row[0]).trim() === oldName &&
-        (!practitioner || String(row[1]).trim() === practitioner)) sourceIndex = index;
-  });
-  if (sourceIndex < 0 && knownRow >= DM.commonFirstRow && knownRow <= DM.commonLastRow) {
+  // При дубликатах обязательно используем строку, которую редактировал пользователь.
+  // Иначе можно переименовать первый дубль и случайно создать новый дубль.
+  if (knownRow >= DM.commonFirstRow && knownRow <= DM.commonLastRow) {
     sourceIndex = knownRow - DM.commonFirstRow;
+  }
+  if (sourceIndex < 0) {
+    commonRows.forEach((row, index) => {
+      if (sourceIndex < 0 && String(row[0]).trim() === oldName &&
+          (!practitioner || String(row[1]).trim() === practitioner)) sourceIndex = index;
+    });
   }
   if (sourceIndex < 0) {
     return { ok: false, message: 'Старое ФИО не найдено в центральной таблице.' };
