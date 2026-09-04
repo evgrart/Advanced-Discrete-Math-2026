@@ -31,12 +31,4 @@
 Может пригодиться:
 
 + [Верещагин. Шень. Начала теории множеств.](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/literature/Vereschagin_N_K_-_Chast_1_Nachala_teorii_mnozhestv_-_2012.pdf)
----
-### Практика 2. Множества и Логика - 1 | [ser-2](URL)
 
-> Знакомство и правила курса. Популярные сюжеты в задачах и методы доказательства.
-
-Может пригодиться:
-
-+ [Верещагин. Шень. Начала теории множеств.](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/literature/Vereschagin_N_K_-_Chast_1_Nachala_teorii_mnozhestv_-_2012.pdf)
----
