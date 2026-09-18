@@ -44,7 +44,7 @@
 
 Материалы:
 
-+ [Шень. Теория множеств](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/literature/Vereschagin_N_K_-_Chast_1_Nachala_teorii_mnozhestv_-_2012.pdf)
++ [Шень. Начала теории множеств](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/literature/Vereschagin_N_K_-_Chast_1_Nachala_teorii_mnozhestv_-_2012.pdf)
 > Шень написал много хорошего не только про индукцию. Его офигенная книжка по теории множеств.
 + [Классный шизо-видос про 7 уровней теории множеств](https://www.youtube.com/watch?v=soq3n95phno)
 > Об этом будет бонусная лекция от Рами.
