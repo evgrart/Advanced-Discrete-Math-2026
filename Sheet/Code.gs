@@ -618,6 +618,7 @@ function refreshPracticeTaskColors_(sheet, layout, previousLast, count, practice
   const lastRow = firstRow + DM.studentsPerGroup - 1;
   const first = columnLabel_(layout.taskFirstCol);
   const solved = columnLabel_(layout.solvedCol);
+  const name = columnLabel_(1);
   const rules = [];
   sheet.getConditionalFormatRules().forEach(rule => {
     const ranges = rule.getRanges().filter(range =>
@@ -636,10 +637,10 @@ function refreshPracticeTaskColors_(sheet, layout, previousLast, count, practice
   add(taskRange, `=${first}${firstRow}="-"`, '#C00000', '#FFFFFF');
   const sRange = sheet.getRange(firstRow, layout.solvedCol, DM.studentsPerGroup, 1);
   const thresholds = coefficientThresholdsForPractice_(practice, count);
-  add(sRange, `=${solved}${firstRow}>=${thresholds['1.25']}`, '#38761D', '#FFFFFF');
-  add(sRange, `=AND(${solved}${firstRow}>=${thresholds['1']},${solved}${firstRow}<${thresholds['1.25']})`, '#70AD47', '#000000');
-  add(sRange, `=AND(${solved}${firstRow}>=${thresholds['0.8']},${solved}${firstRow}<${thresholds['1']})`, '#A9D18E', '#000000');
-  add(sRange, `=${solved}${firstRow}<${thresholds['0.8']}`, '#E2F0D9', '#000000');
+  add(sRange, `=AND($${name}${firstRow}<>"",${solved}${firstRow}>=${thresholds['1.25']})`, '#38761D', '#FFFFFF');
+  add(sRange, `=AND($${name}${firstRow}<>"",${solved}${firstRow}>=${thresholds['1']},${solved}${firstRow}<${thresholds['1.25']})`, '#70AD47', '#000000');
+  add(sRange, `=AND($${name}${firstRow}<>"",${solved}${firstRow}>=${thresholds['0.8']},${solved}${firstRow}<${thresholds['1']})`, '#A9D18E', '#000000');
+  add(sRange, `=AND($${name}${firstRow}<>"",${solved}${firstRow}<${thresholds['0.8']})`, '#E2F0D9', '#000000');
   sheet.setConditionalFormatRules(rules);
 }
 
