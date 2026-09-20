@@ -1,86 +1,71 @@
-﻿\documentclass[12pt,a4paper]{article}
-\usepackage{amsmath,amsthm,amssymb}
-\usepackage[mathscr]{eucal}
-\usepackage[T2A]{fontenc}
-\usepackage[utf8]{inputenc}
-\usepackage[russian]{babel}
+\documentclass[12pt,a4paper]{article}
 
-\oddsidemargin=-17.4mm
-\textwidth=190mm
-\headheight=0pt
-\headsep=0pt
-\topmargin=-5.4mm
-\textheight=257mm
+\usepackage{iftex}
 
-\pagestyle{plain}
+\ifPDFTeX
+  \usepackage{cmap}
+  \usepackage[T2A]{fontenc}
+  \usepackage[utf8]{inputenc}
+  \usepackage{lmodern}
+  \usepackage[english,russian]{babel}
+\else
+  \usepackage{fontspec}
+  \defaultfontfeatures{Ligatures=TeX}
+  \setmainfont{Times New Roman}
+  \setsansfont{Arial}
+  \setmonofont{Consolas}
+  \usepackage{polyglossia}
+  \setmainlanguage{russian}
+  \setotherlanguage{english}
+\fi
 
-\sloppy
-\righthyphenmin=2
-\exhyphenpenalty=10000
+\usepackage{amsmath,amssymb,amsthm,mathtools}
+\usepackage[a4paper,margin=2.2cm,top=2.4cm,bottom=2.2cm]{geometry}
+\usepackage{enumitem}
+\usepackage{fancyhdr}
+\usepackage[hidelinks]{hyperref}
 
-\def\ds{\displaystyle}
-\def\ss{\scriptstyle}
-\def\q#1.{{\bf #1.}}
-\def\N{\mathbb N}
-\def\Z{\mathbb Z}
-\def\Q{\mathbb Q}
-\def\R{\mathbb R}
-\def\Pp{\mathbb P}
-\def\C{{\mathbb C}}
-\def\Cc{{\rm C}}
-\def\eps{{\varepsilon}}
-\def\vec{\overrightarrow}
-\def\ov{\overline}
-\def\mmax{\mathop{\rm max}\limits}
-\def\ord{\rm ord}
-\def\amp{\mathbin\&}
+\providecommand{\SheetNo}{}
+\newcommand{\sheetauthor}{}
 
-\DeclareMathOperator{\Ker}{Ker}
-\DeclareMathOperator{\Ima}{Im}
-\DeclareMathOperator{\Int}{Int}
-\DeclareMathOperator{\Cl}{Cl}
-
-\newcounter{problem}
-\newcounter{partproblem}
 \newcommand{\sheettitle}[1]{
   \begin{center}
-    \large\bf Серия \SheetNo. #1
+    {\Large\bfseries Серия \SheetNo. #1}\\[0.4em]
+    \rule{\linewidth}{0.4pt}
   \end{center}
-  \medskip
+  \vspace{0.5em}
+  \markboth{#1}{#1}
 }
-\newenvironment{problems}{
-  \begin{list}{\arabic{problem}.}{
-    \usecounter{problem}
-    \labelwidth=9mm
-    \labelsep=5mm
-    \leftmargin=14mm
-    \rightmargin=0mm
-    \topsep=0mm
-    \partopsep=0mm
-    \itemsep=5mm
-    \parsep=0mm
-    \listparindent=0mm
-    \itemindent=0mm
-    \def\makelabel##1{\hss\bf ##1}
-  }
-}{
-  \end{list}
-}
-\newenvironment{parts}{
-  \begin{list}{\alph{partproblem})}{
-    \usecounter{partproblem}
-    \labelwidth=6mm
-    \labelsep=3mm
-    \leftmargin=12mm
-    \rightmargin=0mm
-    \topsep=0mm
-    \partopsep=0mm
-    \itemsep=0.5mm
-    \parsep=0mm
-    \listparindent=0mm
-    \itemindent=0mm
-    \def\makelabel##1{\hss ##1}
-  }
-}{
-  \end{list}
-}
+
+\setlength{\headheight}{15pt}
+\pagestyle{fancy}
+\fancyhf{}
+\fancyhead[L]{\small Серия \SheetNo}
+\fancyhead[R]{\small\leftmark}
+\fancyfoot[C]{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\newlist{problems}{enumerate}{2}
+\setlist[problems]{label=\arabic*., ref=\arabic*,
+                   leftmargin=*, itemsep=0.8em, topsep=0.8em}
+
+\newcommand{\cyralphnum}[1]{
+  \ifcase#1\or а\or б\or в\or г\or д\or е\or ж\or з\or и\or к\or л\or м\or
+  н\or п\or р\or с\or т\or у\or ф\or х\or ц\or ч\or ш\or щ\or э\or ю\or я\fi}
+\newcommand{\cyralph}[1]{\cyralphnum{\value{#1}}}
+\AddEnumerateCounter{\cyralph}{\cyralphnum}{щ}
+
+\newlist{parts}{enumerate}{2}
+\setlist[parts]{label=\cyralph*), ref=\cyralph*,
+                leftmargin=1.5em, itemsep=0.25em, topsep=0.25em}
+
+\newcommand{\N}{\mathbb{N}}
+\newcommand{\Z}{\mathbb{Z}}
+\newcommand{\Q}{\mathbb{Q}}
+\newcommand{\R}{\mathbb{R}}
+\providecommand{\C}{}
+\renewcommand{\C}{\mathbb{C}}
+\providecommand{\NOD}{}
+\renewcommand{\NOD}{\operatorname{\text{НОД}}}
+\providecommand{\NOK}{}
+\renewcommand{\NOK}{\operatorname{\text{НОК}}}
