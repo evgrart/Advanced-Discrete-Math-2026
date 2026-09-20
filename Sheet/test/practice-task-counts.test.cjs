@@ -157,10 +157,11 @@ test('shrinks and expands all practitioners, preserves marks, adjusts formulas/c
     assert.ok(s.hidden.has(l.taskLastCol + 1));
     const formulas = s.getRange(4, l.solvedCol, 1, 2).getFormulas()[0];
     assert.ok(formulas[0].includes(`${c.columnLabel_(l.taskLastCol)}4`));
-    assert.ok(formulas[1].includes('2*25/3'));
-    assert.ok(formulas[1].includes('>=25/2'));
+    assert.ok(formulas[1].includes('>=25,1.25'));
+    assert.ok(formulas[1].includes('>=17,1'));
+    assert.ok(formulas[1].includes('>=13,0.8'));
     assert.ok(s.rules.some(rule => rule.formula === '=$A4<>""'));
-    assert.ok(s.rules.some(rule => rule.formula.includes('2*25/3')));
+    assert.ok(s.rules.some(rule => rule.formula.includes('>=25')));
     const expanded = sheet(name, 3), el = c.plusLayout_(name, 3);
     assert.equal(expanded.getMaxColumns(), el.taskLastCol);
     assert.equal(expanded.getRange(3, el.taskLastCol).getDisplayValue(), '40');
@@ -305,19 +306,48 @@ test('snapshot, reconciliation and notes include tasks beyond 30 and exclude rem
   c.clearPlusNotes_(plusFiles);
 });
 
-test('all coefficient boundaries use the configured count, including 1, 25, 30 and 40', () => {
+test('default coefficient boundaries use the configured count and include 1.25', () => {
   const { context: c, dm } = setup();
   for (const count of [1, 25, 30, 40, 200]) {
     dm.practiceTaskCounts = { 2: count };
     const layout = c.plusLayout_('Рами', 2);
-    const formula = c.plusCountFormulas_(layout, count)[0][1];
-    const match = formula.match(/IF\(B4>2\*(\d+)\/3,1,IF\(B4>=(\d+)\/2,0\.8,0\.5\)\)/);
+    const formula = c.plusCountFormulas_(layout, count, 2)[0][1];
+    const match = formula.match(/IF\(B4>=(\d+),1\.25,IF\(B4>=(\d+),1,IF\(B4>=(\d+),0\.8,0\.5\)\)\)/);
     assert.ok(match);
-    assert.equal(Number(match[1]), count); assert.equal(Number(match[2]), count);
+    assert.equal(Number(match[1]), count);
+    assert.equal(Number(match[2]), Math.floor(2 * count / 3) + 1);
+    assert.equal(Number(match[3]), Math.ceil(count / 2));
     for (let solved = 0; solved <= count; solved++) {
-      const coefficient = solved > 2 * Number(match[1]) / 3 ? 1 : solved >= Number(match[2]) / 2 ? .8 : .5;
-      assert.equal(coefficient, solved * 3 > count * 2 ? 1 : solved * 2 >= count ? .8 : .5);
+      const coefficient = solved >= Number(match[1]) ? 1.25 : solved >= Number(match[2]) ? 1 : solved >= Number(match[3]) ? .8 : .5;
+      const expected = solved === count ? 1.25 : solved * 3 > count * 2 ? 1 : solved * 2 >= count ? .8 : .5;
+      assert.equal(coefficient, expected);
     }
+  }
+});
+
+test('custom coefficient boundaries are validated and used per practice', () => {
+  const { context: c, dm } = setup();
+  dm.practiceTaskCounts = { 1: 30, 2: 25 };
+  dm.practiceCoefficientThresholds = {
+    1: { '0.5': 0, '0.8': 5, '1': 8, '1.25': 10 },
+    2: { '0.5': 0, '0.8': 7, '1': 12, '1.25': 20 }
+  };
+  c.validatePracticeTaskCounts_();
+  const layout = c.plusLayout_('Рами', 2);
+  const formula = c.plusCountFormulas_(layout, 25, 2)[0][1];
+  assert.ok(formula.includes('B4>=20,1.25'));
+  assert.ok(formula.includes('B4>=12,1'));
+  assert.ok(formula.includes('B4>=7,0.8'));
+
+  for (const invalid of [
+    { 2: { '0.5': 1, '0.8': 7, '1': 12, '1.25': 20 } },
+    { 2: { '0.5': 0, '0.8': 12, '1': 7, '1.25': 20 } },
+    { 2: { '0.5': 0, '0.8': 7, '1': 12, '1.25': 26 } },
+    { 2: { '0.5': 0, '0.8': 7, '1': 12 } },
+    { 4: { '0.5': 0, '0.8': 7, '1': 12, '1.25': 20 } }
+  ]) {
+    dm.practiceCoefficientThresholds = invalid;
+    assert.throws(() => c.validatePracticeTaskCounts_());
   }
 });
 

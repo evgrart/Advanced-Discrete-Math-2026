@@ -17,6 +17,13 @@ const DM = {
   // Номер практики: количество задач. Одинаково для всех трёх практиков.
   // Например: { 1: 30, 2: 25, 3: 40 }. Неуказанные практики: defaultTaskCount.
   practiceTaskCounts: {},
+  // Номер практики: минимальное число решённых задач для каждого коэффициента.
+  // Для неуказанной практики: 0.5 с 0; 0.8 с половины; 1 после 2/3;
+  // 1.25 за решение всех задач практики.
+  practiceCoefficientThresholds: {
+    // 1: { '0.5': 0, '0.8': 15, '1': 21, '1.25': 30 },
+    // 2: { '0.5': 0, '0.8': 12, '1': 17, '1.25': 25 }
+  },
   studentsPerGroup: 30,
   plusHeaderRow: 3,
   plusFirstRow: 4,
@@ -37,6 +44,19 @@ function practiceTaskCount_(practice) {
     throw new Error(`Количество задач${practice == null ? '' : ' практики ' + practice}: укажите целое число от 1 до 200.`);
   }
   return count;
+}
+
+function coefficientThresholdsForPractice_(practice, taskCount) {
+  const count = taskCount == null ? practiceTaskCount_(practice) : taskCount;
+  const configured = practice != null &&
+    Object.prototype.hasOwnProperty.call(DM.practiceCoefficientThresholds, practice)
+    ? DM.practiceCoefficientThresholds[practice] : null;
+  return configured || {
+    '0.5': 0,
+    '0.8': Math.ceil(count / 2),
+    '1': Math.floor(2 * count / 3) + 1,
+    '1.25': count
+  };
 }
 
 function plusLayout_(practitioner, practice) {
@@ -66,7 +86,7 @@ function onOpen() {
   const menu = ui.createMenu('DM система')
     .addItem('Настроить 4 файла', 'installDmSystem')
     .addItem('Синхронизировать группы', 'syncGroups_')
-    .addItem('Применить количество задач', 'applyPracticeTaskCounts')
+    .addItem('Применить задачи и коэффициенты', 'applyPracticeTaskCounts')
     .addItem('Синхронизировать таблицу', 'syncTable');
   if (typeof telegramMenu_ === 'function') {
     menu.addSubMenu(telegramMenu_(ui));
@@ -432,7 +452,7 @@ function syncTable() {
 function applyPracticeTaskCounts() {
   validateConfig_();
   syncGroups_(null, null, true);
-  SpreadsheetApp.getActive().toast('Количество задач, формулы и оформление обновлены у всех трёх практиков.');
+  SpreadsheetApp.getActive().toast('Количество задач, коэффициенты и оформление обновлены у всех трёх практиков.');
 }
 
 function validatePracticeTaskCounts_() {
@@ -446,6 +466,41 @@ function validatePracticeTaskCounts_() {
       throw new Error(`Неверный номер практики в practiceTaskCounts: ${key}. Допустимо 1–${DM.practiceCount}.`);
     }
     practiceTaskCount_(practice);
+  });
+  validatePracticeCoefficientThresholds_();
+}
+
+function validatePracticeCoefficientThresholds_() {
+  const configured = DM.practiceCoefficientThresholds;
+  if (!configured || Array.isArray(configured) || typeof configured !== 'object') {
+    throw new Error('practiceCoefficientThresholds должен быть объектом с границами коэффициентов по практикам.');
+  }
+  const coefficientKeys = ['0.5', '0.8', '1', '1.25'];
+  Object.keys(configured).forEach(key => {
+    const practice = Number(key);
+    if (!Number.isInteger(practice) || practice < 1 || practice > DM.practiceCount || String(practice) !== key) {
+      throw new Error(`Неверный номер практики в practiceCoefficientThresholds: ${key}. Допустимо 1–${DM.practiceCount}.`);
+    }
+    const thresholds = configured[key];
+    if (!thresholds || Array.isArray(thresholds) || typeof thresholds !== 'object') {
+      throw new Error(`Практика ${practice}: границы коэффициентов должны быть объектом.`);
+    }
+    const keys = Object.keys(thresholds);
+    if (keys.length !== coefficientKeys.length ||
+        keys.some(coefficient => !coefficientKeys.includes(coefficient))) {
+      throw new Error(`Практика ${practice}: укажите ровно четыре границы: '0.5', '0.8', '1' и '1.25'.`);
+    }
+    const values = coefficientKeys.map(coefficient => thresholds[coefficient]);
+    const taskCount = practiceTaskCount_(practice);
+    if (values.some(value => !Number.isInteger(value) || value < 0 || value > taskCount)) {
+      throw new Error(`Практика ${practice}: каждая граница должна быть целым числом от 0 до ${taskCount}.`);
+    }
+    if (values[0] !== 0) {
+      throw new Error(`Практика ${practice}: коэффициент 0.5 должен начинаться с 0 задач.`);
+    }
+    if (values.some((value, index) => index > 0 && value < values[index - 1])) {
+      throw new Error(`Практика ${practice}: границы должны идти по возрастанию: 0.5, 0.8, 1, 1.25.`);
+    }
   });
 }
 
@@ -464,7 +519,7 @@ function practiceTaskHeaders_(sheet, layout) {
 function assertPracticeTaskLayout_(sheet, layout, practice) {
   const headers = practiceTaskHeaders_(sheet, layout);
   if (headers.length !== practiceTaskCount_(practice)) {
-    throw new Error(`Практика ${practice}: количество столбцов не совпадает с конфигом. Выполните «DM система → Применить количество задач» в общей таблице.`);
+    throw new Error(`Практика ${practice}: количество столбцов не совпадает с конфигом. Выполните «DM система → Применить задачи и коэффициенты» в общей таблице.`);
   }
 }
 
@@ -478,15 +533,16 @@ function columnLabel_(column) {
   return label;
 }
 
-function plusCountFormulas_(layout, taskCount) {
+function plusCountFormulas_(layout, taskCount, practice) {
   const first = columnLabel_(layout.taskFirstCol);
   const last = columnLabel_(layout.taskLastCol);
   const solved = columnLabel_(layout.solvedCol);
+  const thresholds = coefficientThresholdsForPractice_(practice, taskCount);
   return Array.from({ length: DM.studentsPerGroup }, (_, offset) => {
     const row = DM.plusFirstRow + offset;
     return [
       `=IF(A${row}="","",COUNTIF(${first}${row}:${last}${row},"+")+COUNTIF(${first}${row}:${last}${row},"1"))`,
-      `=IF(A${row}="","",IF(${solved}${row}>2*${taskCount}/3,1,IF(${solved}${row}>=${taskCount}/2,0.8,0.5)))`
+      `=IF(A${row}="","",IF(${solved}${row}>=${thresholds['1.25']},1.25,IF(${solved}${row}>=${thresholds['1']},1,IF(${solved}${row}>=${thresholds['0.8']},0.8,0.5))))`
     ];
   });
 }
@@ -549,7 +605,7 @@ function syncPracticeTaskLayouts_(central, plusFiles, force) {
 }
 
 function applyPracticeTaskLayout_(plan) {
-  const { sheet, layout, count, headers, nextHeaders, oldLast } = plan;
+  const { sheet, layout, practice, count, headers, nextHeaders, oldLast } = plan;
   const firstRow = DM.plusFirstRow;
   const lastRow = firstRow + DM.studentsPerGroup - 1;
   if (layout.taskLastCol > sheet.getMaxColumns()) {
@@ -568,11 +624,11 @@ function applyPracticeTaskLayout_(plan) {
   sheet.getRange(DM.plusHeaderRow, layout.taskFirstCol, 1, count).setValues([nextHeaders])
     .setBackground('#FFF2CC').setFontColor('#000000').setFontWeight('bold');
   sheet.getRange(firstRow, layout.taskFirstCol, DM.studentsPerGroup, count).setNumberFormat('@');
-  sheet.getRange(firstRow, layout.solvedCol, DM.studentsPerGroup, 2).setFormulas(plusCountFormulas_(layout, count));
-  refreshPracticeTaskColors_(sheet, layout, Math.max(oldLast, layout.taskLastCol), count);
+  sheet.getRange(firstRow, layout.solvedCol, DM.studentsPerGroup, 2).setFormulas(plusCountFormulas_(layout, count, practice));
+  refreshPracticeTaskColors_(sheet, layout, Math.max(oldLast, layout.taskLastCol), count, practice);
 }
 
-function refreshPracticeTaskColors_(sheet, layout, previousLast, count) {
+function refreshPracticeTaskColors_(sheet, layout, previousLast, count, practice) {
   const firstRow = DM.plusFirstRow;
   const lastRow = firstRow + DM.studentsPerGroup - 1;
   const first = columnLabel_(layout.taskFirstCol);
@@ -595,9 +651,11 @@ function refreshPracticeTaskColors_(sheet, layout, previousLast, count) {
   add(taskRange, `=${first}${firstRow}="1"`, '#548235', '#FFFFFF');
   add(taskRange, `=${first}${firstRow}="-"`, '#C00000', '#FFFFFF');
   const sRange = sheet.getRange(firstRow, layout.solvedCol, DM.studentsPerGroup, 1);
-  add(sRange, `=${solved}${firstRow}>2*${count}/3`, '#70AD47', '#000000');
-  add(sRange, `=AND(${solved}${firstRow}>=${count}/2,${solved}${firstRow}<=2*${count}/3)`, '#A9D18E', '#000000');
-  add(sRange, `=${solved}${firstRow}<${count}/2`, '#E2F0D9', '#000000');
+  const thresholds = coefficientThresholdsForPractice_(practice, count);
+  add(sRange, `=${solved}${firstRow}>=${thresholds['1.25']}`, '#38761D', '#FFFFFF');
+  add(sRange, `=AND(${solved}${firstRow}>=${thresholds['1']},${solved}${firstRow}<${thresholds['1.25']})`, '#70AD47', '#000000');
+  add(sRange, `=AND(${solved}${firstRow}>=${thresholds['0.8']},${solved}${firstRow}<${thresholds['1']})`, '#A9D18E', '#000000');
+  add(sRange, `=${solved}${firstRow}<${thresholds['0.8']}`, '#E2F0D9', '#000000');
   sheet.setConditionalFormatRules(rules);
 }
 
