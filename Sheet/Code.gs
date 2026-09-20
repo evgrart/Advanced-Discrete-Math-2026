@@ -1,5 +1,4 @@
 const DM = {
-  // Вставьте ID четырёх Google-таблиц. ID находится между /d/ и /edit в URL.
   centralFileId: '',
   plusFileIds: {
     'Артём': '',
@@ -14,15 +13,10 @@ const DM = {
   plusLogs: 'Логи',
   practiceCount: 15,
   defaultTaskCount: 30,
-  // Номер практики: количество задач. Одинаково для всех трёх практиков.
-  // Например: { 1: 30, 2: 25, 3: 40 }. Неуказанные практики: defaultTaskCount.
-  practiceTaskCounts: {},
-  // Номер практики: минимальное число решённых задач для каждого коэффициента.
-  // Для неуказанной практики: 0.5 с 0; 0.8 с половины; 1 после 2/3;
-  // 1.25 за решение всех задач практики.
+  practiceTaskCounts: { 1: 30, 2: 25 },
   practiceCoefficientThresholds: {
-    // 1: { '0.5': 0, '0.8': 15, '1': 21, '1.25': 30 },
-    // 2: { '0.5': 0, '0.8': 12, '1': 17, '1.25': 25 }
+    1: { '0.5': 0, '0.8': 10, '1': 20, '1.25': 28},
+    2: { '0.5': 0, '0.8': 25, '1': 25, '1.25': 25 }
   },
   studentsPerGroup: 30,
   plusHeaderRow: 3,
@@ -104,7 +98,6 @@ function installDmSystem() {
   SpreadsheetApp.getActive().toast('Центральная таблица и три файла практиков настроены.');
 }
 
-// Установочный триггер должен быть создан для всех четырёх таблиц.
 function setupTriggers_() {
   const ids = [getCentralId_()].concat(DM.practitioners.map(name => DM.plusFileIds[name]));
   ScriptApp.getProjectTriggers().forEach(trigger => {
@@ -115,7 +108,6 @@ function setupTriggers_() {
   });
 }
 
-// Это единственный обработчик изменений во всех четырёх Google-таблицах.
 function handleEdit_(event) {
   if (!event || !event.range || !event.source) return;
   const sourceId = event.source.getId();
@@ -263,8 +255,6 @@ function renameStudentEverywhere_(central, oldName, newName, practitioner, known
   const common = central.getSheetByName(DM.common);
   const commonRows = common.getRange(DM.commonFirstRow, 1, DM.commonLastRow - DM.commonFirstRow + 1, 2).getDisplayValues();
   let sourceIndex = -1;
-  // При дубликатах обязательно используем строку, которую редактировал пользователь.
-  // Иначе можно переименовать первый дубль и случайно создать новый дубль.
   if (knownRow >= DM.commonFirstRow && knownRow <= DM.commonLastRow) {
     sourceIndex = knownRow - DM.commonFirstRow;
   }
@@ -515,7 +505,6 @@ function practiceTaskHeaders_(sheet, layout) {
   return headers;
 }
 
-// Бот и onEdit не должны читать усечённый набор задач до применения конфига.
 function assertPracticeTaskLayout_(sheet, layout, practice) {
   const headers = practiceTaskHeaders_(sheet, layout);
   if (headers.length !== practiceTaskCount_(practice)) {
@@ -558,8 +547,6 @@ function practiceColumnsHaveData_(sheet, firstColumn, width) {
 function syncPracticeTaskLayouts_(central, plusFiles, force) {
   validatePracticeTaskCounts_();
   const plans = [];
-  // Сначала проверяем ВСЕ листы. При отказе из-за занятых столбцов ни один
-  // плюсовик, CW или журнал не успеет измениться.
   DM.practitioners.forEach(practitioner => {
     const file = plusFiles[practitioner];
     if (!file) throw new Error(`Не открыт файл практика ${practitioner}.`);
@@ -572,7 +559,6 @@ function syncPracticeTaskLayouts_(central, plusFiles, force) {
       if (headers.length === count && !force) continue;
       if (!headers.length) throw new Error(`На листе «${sheet.getName()}» у ${practitioner} нет шаблона задач.`);
       const oldLast = layout.taskFirstCol + headers.length - 1;
-      // Проверяем также формулы, даже если их результат — пустая строка.
       if (count < headers.length) {
         if (practiceColumnsHaveData_(sheet, layout.taskLastCol + 1, headers.length - count)) {
           throw new Error(`${practitioner}, практика ${practice}: нельзя уменьшить число задач до ${count} — в убираемых столбцах есть данные. Сначала разберите эти отметки или оставьте прежнее число задач.`);
@@ -612,7 +598,6 @@ function applyPracticeTaskLayout_(plan) {
     sheet.insertColumnsAfter(sheet.getMaxColumns(), layout.taskLastCol - sheet.getMaxColumns());
   }
   if (count > headers.length) {
-    // Копируем только оформление; отметки предыдущей задачи не размножаем.
     sheet.getRange(DM.plusHeaderRow, oldLast, lastRow - DM.plusHeaderRow + 1, 1)
       .copyFormatToRange(sheet, oldLast + 1, layout.taskLastCol, DM.plusHeaderRow, lastRow);
     sheet.setColumnWidths(oldLast + 1, layout.taskLastCol - oldLast, sheet.getColumnWidth(oldLast));
@@ -634,7 +619,6 @@ function refreshPracticeTaskColors_(sheet, layout, previousLast, count, practice
   const first = columnLabel_(layout.taskFirstCol);
   const solved = columnLabel_(layout.solvedCol);
   const rules = [];
-  // Заменяем правила задач и S, сохраняя правила остальных столбцов.
   sheet.getConditionalFormatRules().forEach(rule => {
     const ranges = rule.getRanges().filter(range =>
       !(range.getColumn() === layout.solvedCol && range.getNumColumns() === 1) &&
@@ -817,7 +801,6 @@ function syncCwRoster_(central) {
       saved[name] = { attempt: row[2], scores: row.slice(4, 9) };
     });
   });
-  // Два блока по 90 студентов: шапки находятся в строках 1 и 95.
   [3, 96].forEach(firstRow => {
     const roster = [];
     const scores = [];
@@ -1067,8 +1050,6 @@ function reconcilePlusResults_(central, plusFiles, sheetStates) {
     }
   });
 
-  // Состояние 1/- в плюсовиках является источником истины. Оставляем ровно
-  // одну соответствующую запись, а старые, противоположные и дубли удаляем.
   const lastRow = findLastLogRow_(logs);
   const rangesToClear = [];
   if (lastRow >= DM.logFirstRow) {
