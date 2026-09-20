@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import sys
+import re
+import argparse
 from copy import copy
 from pathlib import Path
 
@@ -16,7 +18,6 @@ from openpyxl.worksheet.datavalidation import DataValidation
 ROOT = Path(__file__).parent
 PRACTICES = 15
 STUDENTS = 30
-TASKS = 30
 PRACTITIONERS = ["Артём", "Рами", "Немат"]
 
 NAVY = "17365D"
@@ -26,6 +27,34 @@ RED = "C00000"
 WHITE = "FFFFFF"
 INPUT = "FFFFFF"
 THIN = Side(style="thin", color="D9E1F2")
+
+
+def load_task_counts(config_path=ROOT / "Code.gs"):
+    """Read literal task counts from the same config used by Apps Script."""
+    source = config_path.read_text(encoding="utf-8-sig")
+    source = re.sub(r"//[^\n]*|/\*[\s\S]*?\*/", "", source)
+    default_match = re.search(r"\bdefaultTaskCount\s*:\s*(-?\d+)\s*,", source)
+    overrides_match = re.search(r"\bpracticeTaskCounts\s*:\s*\{([^}]*)\}", source)
+    if not default_match or not overrides_match:
+        raise ValueError("Code.gs: нужны defaultTaskCount и practiceTaskCounts с числовыми значениями")
+    default = int(default_match[1])
+    if not 1 <= default <= 200:
+        raise ValueError("defaultTaskCount: допустимо от 1 до 200 задач")
+    counts = {practice: default for practice in range(1, PRACTICES + 1)}
+    seen = set()
+    for entry in overrides_match[1].split(","):
+        if not entry.strip():
+            continue
+        match = re.fullmatch(r'''\s*(?:"(\d+)"|'(\d+)'|(\d+))\s*:\s*(-?\d+)\s*''', entry)
+        if not match:
+            raise ValueError(f"practiceTaskCounts: неверная запись {entry!r}")
+        key = next(value for value in match.groups()[:3] if value is not None)
+        practice, count = int(key), int(match[4])
+        if str(practice) != key or not 1 <= practice <= PRACTICES or not 1 <= count <= 200 or practice in seen:
+            raise ValueError(f"practiceTaskCounts: неверный номер, число задач или повтор: {entry!r}")
+        seen.add(practice)
+        counts[practice] = count
+    return counts
 
 
 def task_label(value):
@@ -155,7 +184,7 @@ def make_common_legacy(wb):
         ws.cell(row, 1, name)
         ws.cell(row, 2, practitioner)
         ws.cell(row, 4, "Да")
-        ws.cell(row, 5, f'=IF(A{row}="","",SUMIF(\'Логи\'!$A$4:$A$3006,A{row},\'Логи\'!$H$4:$H$3006))')
+        ws.cell(row, 5, f'=IF(A{row}="","",SUMIF(\'Логи\'!$A$4:$A$3006,TRIM(A{row}),\'Логи\'!$H$4:$H$3006))')
         ws.cell(row, 6, f'=IF(A{row}="","",SUMIF(\'CW\'!$A:$A,A{row},\'CW\'!$D:$D))')
         ws.cell(row, 7, cw_status_formula(row, 3, 92))
         ws.cell(row, 8, cw_status_formula(row, 96, 185))
@@ -203,7 +232,7 @@ def make_common(wb):
         ws.cell(row, 1, name)
         ws.cell(row, 2, practitioner)
         ws.cell(row, 4, "Да")
-        ws.cell(row, 5, f'=IF(A{row}="","",SUMIF(\'Логи\'!$A$4:$A$3006,A{row},\'Логи\'!$H$4:$H$3006))')
+        ws.cell(row, 5, f'=IF(A{row}="","",SUMIF(\'Логи\'!$A$4:$A$3006,TRIM(A{row}),\'Логи\'!$H$4:$H$3006))')
         ws.cell(row, 6, f'=IF(A{row}="","",SUMIF(\'CW\'!$A:$A,A{row},\'CW\'!$D:$D))')
         ws.cell(row, 7, cw_status_formula(row, 3, 92))
         ws.cell(row, 8, cw_status_formula(row, 96, 185))
@@ -337,23 +366,25 @@ def make_logs(wb):
     return ws
 
 
-def make_plus(path, practitioner, index):
+def make_plus(path, practitioner, index, task_counts=None):
+    task_counts = load_task_counts() if task_counts is None else task_counts
     wb = Workbook()
     ws = wb.active
     ws.title = "Практика 1"
     roster = [(f"Студент{index}.{i}", "") for i in range(1, STUDENTS + 1)]
-    labels = [str(i) for i in range(1, TASKS + 1)]
     has_presence = practitioner != "Рами"
     presence_col = 2 if has_presence else None
     s_col = 3 if has_presence else 2
     coefficient_col = 4 if has_presence else 3
     total_col = 5 if has_presence else 4
     task_first_col = 6 if has_presence else 5
-    task_last_col = task_first_col + TASKS - 1
     task_first_letter = get_column_letter(task_first_col)
-    task_last_letter = get_column_letter(task_last_col)
-    end_col = task_last_col
     for practice in range(1, PRACTICES + 1):
+        task_count = task_counts[practice]
+        labels = [str(i) for i in range(1, task_count + 1)]
+        task_last_col = task_first_col + task_count - 1
+        task_last_letter = get_column_letter(task_last_col)
+        end_col = task_last_col
         if practice > 1:
             ws = wb.create_sheet(f"Практика {practice}")
         header = 3
@@ -394,9 +425,9 @@ def make_plus(path, practitioner, index):
             align_center(ws, first, last, [presence_col])
         color_tasks(ws, header, first, last, task_first_col, task_last_col)
         s_letter = get_column_letter(s_col)
-        ws.conditional_formatting.add(f"{s_letter}{first}:{s_letter}{last}", CellIsRule(operator="greaterThanOrEqual", formula=["21"], fill=PatternFill("solid", fgColor="70AD47")))
-        ws.conditional_formatting.add(f"{s_letter}{first}:{s_letter}{last}", CellIsRule(operator="between", formula=["15", "20"], fill=PatternFill("solid", fgColor="A9D18E")))
-        ws.conditional_formatting.add(f"{s_letter}{first}:{s_letter}{last}", CellIsRule(operator="lessThan", formula=["15"], fill=PatternFill("solid", fgColor="E2F0D9")))
+        ws.conditional_formatting.add(f"{s_letter}{first}:{s_letter}{last}", CellIsRule(operator="greaterThan", formula=[f"2*{task_count}/3"], fill=PatternFill("solid", fgColor="70AD47")))
+        ws.conditional_formatting.add(f"{s_letter}{first}:{s_letter}{last}", CellIsRule(operator="between", formula=[f"{task_count}/2", f"2*{task_count}/3"], fill=PatternFill("solid", fgColor="A9D18E")))
+        ws.conditional_formatting.add(f"{s_letter}{first}:{s_letter}{last}", CellIsRule(operator="lessThan", formula=[f"{task_count}/2"], fill=PatternFill("solid", fgColor="E2F0D9")))
         ws.freeze_panes = f"{task_first_letter}4"
         ws.sheet_view.showGridLines = False
         fixed_widths = {"A": 27}
@@ -438,6 +469,11 @@ def make_plus_logs(wb):
 
 
 def main():
+    parser = argparse.ArgumentParser(description="Создание XLSX-шаблонов ДМ; число задач берётся из Code.gs")
+    parser.add_argument("--output-dir", type=Path, default=ROOT, help="Каталог для новых шаблонов")
+    args = parser.parse_args()
+    task_counts = load_task_counts()
+    args.output_dir.mkdir(parents=True, exist_ok=True)
     central = Workbook()
     central.remove(central.active)
     make_common(central)
@@ -449,9 +485,9 @@ def main():
     central.calculation.fullCalcOnLoad = True
     central.calculation.forceFullCalc = True
     central.calculation.calcMode = "auto"
-    central.save(ROOT / "ДМобщее.xlsx")
+    central.save(args.output_dir / "ДМобщее.xlsx")
     for index, practitioner in enumerate(PRACTITIONERS, 1):
-        make_plus(ROOT / f"ДМ{practitioner}.xlsx", practitioner, index)
+        make_plus(args.output_dir / f"ДМ{practitioner}.xlsx", practitioner, index, task_counts)
     print("Created four DM workbooks")
 
 

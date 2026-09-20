@@ -13,13 +13,16 @@ const DM = {
   logs: 'Логи',
   plusLogs: 'Логи',
   practiceCount: 15,
+  defaultTaskCount: 30,
+  // Номер практики: количество задач. Одинаково для всех трёх практиков.
+  // Например: { 1: 30, 2: 25, 3: 40 }. Неуказанные практики: defaultTaskCount.
+  practiceTaskCounts: {},
   studentsPerGroup: 30,
   plusHeaderRow: 3,
   plusFirstRow: 4,
   plusCoefficientCol: 4,
   plusTotalCol: 5,
   taskFirstCol: 6,
-  taskLastCol: 35,
   commonFirstRow: 4,
   commonLastRow: 93,
   logFirstRow: 4,
@@ -27,22 +30,34 @@ const DM = {
   timeZone: 'Europe/Moscow'
 };
 
-function plusLayout_(practitioner) {
+function practiceTaskCount_(practice) {
+  const count = practice != null && Object.prototype.hasOwnProperty.call(DM.practiceTaskCounts, practice)
+    ? DM.practiceTaskCounts[practice] : DM.defaultTaskCount;
+  if (!Number.isInteger(count) || count < 1 || count > 200) {
+    throw new Error(`Количество задач${practice == null ? '' : ' практики ' + practice}: укажите целое число от 1 до 200.`);
+  }
+  return count;
+}
+
+function plusLayout_(practitioner, practice) {
+  const taskCount = practiceTaskCount_(practice);
   if (practitioner === 'Рами') {
     return {
       presenceCol: 0,
+      solvedCol: 2,
       coefficientCol: 3,
       totalCol: 4,
       taskFirstCol: 5,
-      taskLastCol: 34
+      taskLastCol: 4 + taskCount
     };
   }
   return {
     presenceCol: 2,
+    solvedCol: 3,
     coefficientCol: DM.plusCoefficientCol,
     totalCol: DM.plusTotalCol,
     taskFirstCol: DM.taskFirstCol,
-    taskLastCol: DM.taskLastCol
+    taskLastCol: DM.taskFirstCol + taskCount - 1
   };
 }
 
@@ -51,6 +66,7 @@ function onOpen() {
   const menu = ui.createMenu('DM система')
     .addItem('Настроить 4 файла', 'installDmSystem')
     .addItem('Синхронизировать группы', 'syncGroups_')
+    .addItem('Применить количество задач', 'applyPracticeTaskCounts')
     .addItem('Синхронизировать таблицу', 'syncTable');
   if (typeof telegramMenu_ === 'function') {
     menu.addSubMenu(telegramMenu_(ui));
@@ -141,7 +157,9 @@ function handlePlusEdit_(event, practitioner) {
   const cell = event.range;
   const row = cell.getRow();
   const col = cell.getColumn();
-  const layout = plusLayout_(practitioner);
+  const practiceNo = practiceFromSheet_(sheet);
+  if (!practiceNo) return;
+  const layout = plusLayout_(practitioner, practiceNo);
   const plusFirst = DM.plusFirstRow;
   const plusLast = plusFirst + DM.studentsPerGroup - 1;
 
@@ -167,10 +185,8 @@ function handlePlusEdit_(event, practitioner) {
     return;
   }
   if (col < layout.taskFirstCol || col > layout.taskLastCol) return;
+  assertPracticeTaskLayout_(sheet, layout, practiceNo);
   cell.clearNote();
-
-  const practiceNo = practiceFromSheet_(sheet);
-  if (!practiceNo) return;
   const plusHeader = DM.plusHeaderRow;
   if (row < plusFirst || row > plusLast) return;
 
@@ -413,6 +429,178 @@ function syncTable() {
   SpreadsheetApp.getActive().toast('Центральная таблица синхронизирована.');
 }
 
+function applyPracticeTaskCounts() {
+  validateConfig_();
+  syncGroups_(null, null, true);
+  SpreadsheetApp.getActive().toast('Количество задач, формулы и оформление обновлены у всех трёх практиков.');
+}
+
+function validatePracticeTaskCounts_() {
+  if (!DM.practiceTaskCounts || Array.isArray(DM.practiceTaskCounts) || typeof DM.practiceTaskCounts !== 'object') {
+    throw new Error('practiceTaskCounts должен быть объектом, например { 1: 30, 2: 25 }.');
+  }
+  practiceTaskCount_();
+  Object.keys(DM.practiceTaskCounts).forEach(key => {
+    const practice = Number(key);
+    if (!Number.isInteger(practice) || practice < 1 || practice > DM.practiceCount || String(practice) !== key) {
+      throw new Error(`Неверный номер практики в practiceTaskCounts: ${key}. Допустимо 1–${DM.practiceCount}.`);
+    }
+    practiceTaskCount_(practice);
+  });
+}
+
+function practiceTaskHeaders_(sheet, layout) {
+  const width = sheet.getLastColumn() - layout.taskFirstCol + 1;
+  if (width <= 0) return [];
+  const headers = sheet.getRange(DM.plusHeaderRow, layout.taskFirstCol, 1, width).getDisplayValues()[0];
+  while (headers.length && !String(headers[headers.length - 1]).trim()) headers.pop();
+  if (headers.some(value => !String(value).trim())) {
+    throw new Error(`На листе «${sheet.getName()}» есть пустой заголовок между задачами. Заполните его перед синхронизацией.`);
+  }
+  return headers;
+}
+
+// Бот и onEdit не должны читать усечённый набор задач до применения конфига.
+function assertPracticeTaskLayout_(sheet, layout, practice) {
+  const headers = practiceTaskHeaders_(sheet, layout);
+  if (headers.length !== practiceTaskCount_(practice)) {
+    throw new Error(`Практика ${practice}: количество столбцов не совпадает с конфигом. Выполните «DM система → Применить количество задач» в общей таблице.`);
+  }
+}
+
+function columnLabel_(column) {
+  let label = '';
+  while (column > 0) {
+    column--;
+    label = String.fromCharCode(65 + column % 26) + label;
+    column = Math.floor(column / 26);
+  }
+  return label;
+}
+
+function plusCountFormulas_(layout, taskCount) {
+  const first = columnLabel_(layout.taskFirstCol);
+  const last = columnLabel_(layout.taskLastCol);
+  const solved = columnLabel_(layout.solvedCol);
+  return Array.from({ length: DM.studentsPerGroup }, (_, offset) => {
+    const row = DM.plusFirstRow + offset;
+    return [
+      `=IF(A${row}="","",COUNTIF(${first}${row}:${last}${row},"+")+COUNTIF(${first}${row}:${last}${row},"1"))`,
+      `=IF(A${row}="","",IF(${solved}${row}>2*${taskCount}/3,1,IF(${solved}${row}>=${taskCount}/2,0.8,0.5)))`
+    ];
+  });
+}
+
+function practiceColumnsHaveData_(sheet, firstColumn, width) {
+  if (width <= 0) return false;
+  const range = sheet.getRange(DM.plusFirstRow, firstColumn,
+    Math.max(DM.studentsPerGroup, sheet.getLastRow() - DM.plusFirstRow + 1), width);
+  return range.getValues().some(row => row.some(value => value !== '' && value != null)) ||
+    range.getFormulas().some(row => row.some(Boolean));
+}
+
+function syncPracticeTaskLayouts_(central, plusFiles, force) {
+  validatePracticeTaskCounts_();
+  const plans = [];
+  // Сначала проверяем ВСЕ листы. При отказе из-за занятых столбцов ни один
+  // плюсовик, CW или журнал не успеет измениться.
+  DM.practitioners.forEach(practitioner => {
+    const file = plusFiles[practitioner];
+    if (!file) throw new Error(`Не открыт файл практика ${practitioner}.`);
+    for (let practice = 1; practice <= DM.practiceCount; practice++) {
+      const sheet = getPlusSheet_(file, practice);
+      if (!sheet) throw new Error(`В файле ${practitioner} нет листа «Практика ${practice}».`);
+      const layout = plusLayout_(practitioner, practice);
+      const headers = practiceTaskHeaders_(sheet, layout);
+      const count = practiceTaskCount_(practice);
+      if (headers.length === count && !force) continue;
+      if (!headers.length) throw new Error(`На листе «${sheet.getName()}» у ${practitioner} нет шаблона задач.`);
+      const oldLast = layout.taskFirstCol + headers.length - 1;
+      // Проверяем также формулы, даже если их результат — пустая строка.
+      if (count < headers.length) {
+        if (practiceColumnsHaveData_(sheet, layout.taskLastCol + 1, headers.length - count)) {
+          throw new Error(`${practitioner}, практика ${practice}: нельзя уменьшить число задач до ${count} — в убираемых столбцах есть данные. Сначала разберите эти отметки или оставьте прежнее число задач.`);
+        }
+      } else if (count > headers.length && practiceColumnsHaveData_(sheet, oldLast + 1,
+        Math.min(layout.taskLastCol, sheet.getMaxColumns()) - oldLast)) {
+        throw new Error(`${practitioner}, практика ${practice}: справа от задач есть данные без заголовков. Разберите их перед добавлением новых задач.`);
+      }
+      const nextHeaders = Array.from({ length: count }, (_, i) => i < headers.length ? headers[i] : String(i + 1));
+      if (nextHeaders.some((value, i) => nextHeaders.slice(0, i).some(other => tasksEqual_(other, value)))) {
+        throw new Error(`${practitioner}, практика ${practice}: новые номера совпадут с существующими заголовками задач.`);
+      }
+      plans.push({ sheet, layout, practice, practitioner, count, headers, nextHeaders, oldLast });
+    }
+  });
+  const shrinking = plans.filter(plan => plan.count < plan.headers.length);
+  if (shrinking.length) {
+    const logs = central.getSheetByName(DM.logs);
+    const last = findLastLogRow_(logs);
+    const rows = last >= DM.logFirstRow ? logs.getRange(DM.logFirstRow, 1, last - DM.logFirstRow + 1, 4).getValues() : [];
+    shrinking.forEach(plan => {
+      const removed = plan.headers.slice(plan.count);
+      if (rows.some(row => String(row[0]).trim() && Number(row[2]) === plan.practice && removed.some(task => tasksEqual_(task, row[3])))) {
+        throw new Error(`Практика ${plan.practice}: по убираемым задачам есть записи в центральных «Логах». Уменьшение отменено, чтобы сохранить начисления.`);
+      }
+    });
+  }
+  plans.forEach(applyPracticeTaskLayout_);
+  if (plans.length) SpreadsheetApp.flush();
+}
+
+function applyPracticeTaskLayout_(plan) {
+  const { sheet, layout, count, headers, nextHeaders, oldLast } = plan;
+  const firstRow = DM.plusFirstRow;
+  const lastRow = firstRow + DM.studentsPerGroup - 1;
+  if (layout.taskLastCol > sheet.getMaxColumns()) {
+    sheet.insertColumnsAfter(sheet.getMaxColumns(), layout.taskLastCol - sheet.getMaxColumns());
+  }
+  if (count > headers.length) {
+    // Копируем только оформление; отметки предыдущей задачи не размножаем.
+    sheet.getRange(DM.plusHeaderRow, oldLast, lastRow - DM.plusHeaderRow + 1, 1)
+      .copyFormatToRange(sheet, oldLast + 1, layout.taskLastCol, DM.plusHeaderRow, lastRow);
+    sheet.setColumnWidths(oldLast + 1, layout.taskLastCol - oldLast, sheet.getColumnWidth(oldLast));
+  } else if (count < headers.length) {
+    sheet.getRange(DM.plusHeaderRow, layout.taskLastCol + 1, 1, headers.length - count).clearContent();
+    sheet.hideColumns(layout.taskLastCol + 1, headers.length - count);
+  }
+  sheet.showColumns(layout.taskFirstCol, count);
+  sheet.getRange(DM.plusHeaderRow, layout.taskFirstCol, 1, count).setValues([nextHeaders])
+    .setBackground('#FFF2CC').setFontColor('#000000').setFontWeight('bold');
+  sheet.getRange(firstRow, layout.taskFirstCol, DM.studentsPerGroup, count).setNumberFormat('@');
+  sheet.getRange(firstRow, layout.solvedCol, DM.studentsPerGroup, 2).setFormulas(plusCountFormulas_(layout, count));
+  refreshPracticeTaskColors_(sheet, layout, Math.max(oldLast, layout.taskLastCol), count);
+}
+
+function refreshPracticeTaskColors_(sheet, layout, previousLast, count) {
+  const firstRow = DM.plusFirstRow;
+  const lastRow = firstRow + DM.studentsPerGroup - 1;
+  const first = columnLabel_(layout.taskFirstCol);
+  const solved = columnLabel_(layout.solvedCol);
+  const rules = [];
+  // Заменяем правила задач и S, сохраняя правила остальных столбцов.
+  sheet.getConditionalFormatRules().forEach(rule => {
+    const ranges = rule.getRanges().filter(range =>
+      !(range.getColumn() === layout.solvedCol && range.getNumColumns() === 1) &&
+      !(range.getColumn() >= layout.taskFirstCol && range.getLastColumn() <= previousLast));
+    if (ranges.length) rules.push(rule.copy().setRanges(ranges).build());
+  });
+  function add(range, formula, background, font) {
+    rules.push(SpreadsheetApp.newConditionalFormatRule().whenFormulaSatisfied(formula)
+      .setBackground(background).setFontColor(font).setRanges([range]).build());
+  }
+  const taskRange = sheet.getRange(firstRow, layout.taskFirstCol, DM.studentsPerGroup, count);
+  add(sheet.getRange(DM.plusHeaderRow, layout.taskFirstCol, 1, count), `=COUNTIF(${first}$${firstRow}:${first}$${lastRow},"1")>0`, '#548235', '#FFFFFF');
+  add(taskRange, `=${first}${firstRow}="+"`, '#C6E0B4', '#000000');
+  add(taskRange, `=${first}${firstRow}="1"`, '#548235', '#FFFFFF');
+  add(taskRange, `=${first}${firstRow}="-"`, '#C00000', '#FFFFFF');
+  const sRange = sheet.getRange(firstRow, layout.solvedCol, DM.studentsPerGroup, 1);
+  add(sRange, `=${solved}${firstRow}>2*${count}/3`, '#70AD47', '#000000');
+  add(sRange, `=AND(${solved}${firstRow}>=${count}/2,${solved}${firstRow}<=2*${count}/3)`, '#A9D18E', '#000000');
+  add(sRange, `=${solved}${firstRow}<${count}/2`, '#E2F0D9', '#000000');
+  sheet.setConditionalFormatRules(rules);
+}
+
 function refreshCentral_legacy() {
   const central = SpreadsheetApp.openById(getCentralId_());
   SpreadsheetApp.flush();
@@ -421,7 +609,7 @@ function refreshCentral_legacy() {
   const common = central.getSheetByName(DM.common);
   for (let row = DM.commonFirstRow; row <= DM.commonLastRow; row++) {
     common.getRange(row, 5).setFormula(
-      `=IF(A${row}="","",SUMIF('${DM.logs}'!$A$${DM.logFirstRow}:$A$${DM.logMaxRow},A${row},'${DM.logs}'!$H$${DM.logFirstRow}:$H$${DM.logMaxRow}))`
+      `=IF(A${row}="","",SUMIF('${DM.logs}'!$A$${DM.logFirstRow}:$A$${DM.logMaxRow},TRIM(A${row}),'${DM.logs}'!$H$${DM.logFirstRow}:$H$${DM.logMaxRow}))`
     );
     common.getRange(row, 6).setFormula(`=IF(A${row}="","",SUMIF('${DM.cw}'!$A:$A,A${row},'${DM.cw}'!$D:$D))`);
     common.getRange(row, 7).setFormula(
@@ -458,7 +646,7 @@ function refreshCentral_(central, plusFiles, sheetStates) {
   const gradeFormulas = [];
   for (let row = DM.commonFirstRow; row <= DM.commonLastRow; row++) {
     mainFormulas.push([
-      `=IF(A${row}="","",SUMIF('${DM.logs}'!$A$${DM.logFirstRow}:$A$${DM.logMaxRow},A${row},'${DM.logs}'!$H$${DM.logFirstRow}:$H$${DM.logMaxRow}))`,
+      `=IF(A${row}="","",SUMIF('${DM.logs}'!$A$${DM.logFirstRow}:$A$${DM.logMaxRow},TRIM(A${row}),'${DM.logs}'!$H$${DM.logFirstRow}:$H$${DM.logMaxRow}))`,
       `=IF(A${row}="","",SUMIF('${DM.cw}'!$A:$A,A${row},'${DM.cw}'!$D:$D))`,
       krStatusFormula_(row, 3, 92),
       krStatusFormula_(row, 96, 185),
@@ -493,12 +681,13 @@ function refreshRanking_(central) {
   if (rows.length) ranking.getRange(4, 1, rows.length, 5).setValues(rows);
 }
 
-function syncGroups_(central, plusFiles) {
+function syncGroups_(central, plusFiles, forceTaskLayout) {
   const lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
     central = central || SpreadsheetApp.openById(getCentralId_());
     plusFiles = openPlusFiles_(plusFiles);
+    syncPracticeTaskLayouts_(central, plusFiles, forceTaskLayout);
     const commonRows = central.getSheetByName(DM.common).getRange(DM.commonFirstRow, 1, 90, 4).getDisplayValues();
     const groups = [[], [], []];
     commonRows.forEach(row => {
@@ -512,10 +701,10 @@ function syncGroups_(central, plusFiles) {
     DM.practitioners.forEach((practitioner, index) => {
       const file = plusFiles[practitioner];
       if (!file) return;
-      const layout = plusLayout_(practitioner);
       const roster = groups[index].slice(0, DM.studentsPerGroup);
-      const taskCount = layout.taskLastCol - layout.taskFirstCol + 1;
       for (let practice = 1; practice <= DM.practiceCount; practice++) {
+        const layout = plusLayout_(practitioner, practice);
+        const taskCount = practiceTaskCount_(practice);
         const sheet = getPlusSheet_(file, practice);
         if (!sheet) continue;
         const first = DM.plusFirstRow;
@@ -590,9 +779,9 @@ function collectSnapshots_(plusFiles) {
   DM.practitioners.forEach(practitioner => {
     const file = plusFiles[practitioner];
     if (!file) return;
-    const layout = plusLayout_(practitioner);
     snapshots.sheets[practitioner] = {};
     for (let practice = 1; practice <= DM.practiceCount; practice++) {
+      const layout = plusLayout_(practitioner, practice);
       const sheet = getPlusSheet_(file, practice);
       if (!sheet) continue;
       const first = DM.plusFirstRow;
@@ -697,8 +886,8 @@ function clearPlusNotes_(plusFiles) {
   DM.practitioners.forEach(practitioner => {
     const file = plusFiles[practitioner];
     if (!file) return;
-    const layout = plusLayout_(practitioner);
     for (let practice = 1; practice <= DM.practiceCount; practice++) {
+      const layout = plusLayout_(practitioner, practice);
       const sheet = getPlusSheet_(file, practice);
       if (!sheet) continue;
       sheet.getRange(DM.plusFirstRow, layout.taskFirstCol,
@@ -771,8 +960,8 @@ function reconcilePlusResults_(central, plusFiles, sheetStates) {
   DM.practitioners.forEach((practitioner, practitionerIndex) => {
     const file = plusFiles[practitioner];
     if (!file) return;
-    const layout = plusLayout_(practitioner);
     for (let practice = 1; practice <= DM.practiceCount; practice++) {
+      const layout = plusLayout_(practitioner, practice);
       const sheet = getPlusSheet_(file, practice);
       if (!sheet) continue;
       const state = sheetStates && sheetStates[practitioner]
@@ -943,6 +1132,7 @@ function getCentralId_() {
 }
 
 function validateConfig_() {
+  validatePracticeTaskCounts_();
   const missing = [];
   if (!DM.centralFileId) missing.push('centralFileId');
   DM.practitioners.forEach(name => {
