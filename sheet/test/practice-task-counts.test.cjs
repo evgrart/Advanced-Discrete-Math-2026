@@ -49,16 +49,35 @@ class Range {
   getSheet() { return this.sheet; }
   getDisplayValue() { return this.getDisplayValues()[0][0]; }
   clearNote() { return this; }
+  breakApart() { this.sheet.unmerged = true; return this; }
+  getDataValidations() {
+    return Array.from({ length: this.height }, (_, i) => Array(this.width).fill(this.sheet.validations.get(this.row + i)));
+  }
+  setDataValidations(rows) {
+    assert.equal(rows.length, this.height);
+    rows.forEach((row, index) => {
+      assert.equal(row.length, this.width);
+      this.sheet.validations.set(this.row + index, row[0]);
+    });
+    return this;
+  }
   setNumberFormat() { return this; }
   setBackground() { return this; }
   setFontColor() { return this; }
   setFontWeight() { return this; }
-  copyFormatToRange(sheet, from, to) { sheet.copiedFormat = [from, to]; return this; }
+  copyFormatToRange(sheet, from, to, firstRow, lastRow) {
+    sheet.copiedFormat = [from, to];
+    for (let row = firstRow; row <= lastRow; row++) sheet.formattedRows.add(row);
+    return this;
+  }
 }
 
 class Sheet {
   constructor(name, maxColumns = 35) {
     Object.assign(this, { name, maxColumns, data: [], formulas: new Map(), rules: [], hidden: new Set(), writes: 0 });
+    this.maxRows = 40;
+    this.validations = new Map([[4, 'Да,Нет']]);
+    this.formattedRows = new Set();
   }
   put(row, col, value) {
     if (!this.data[row - 1]) this.data[row - 1] = [];
@@ -71,6 +90,10 @@ class Sheet {
     return Math.max(1, ...this.data.filter(Boolean).map(row => row.reduce((last, value, i) => value !== '' && value != null ? i + 1 : last, 0)));
   }
   getMaxColumns() { return this.maxColumns; }
+  getMaxRows() { return this.maxRows; }
+  insertRowsAfter(after, count) { assert.equal(after, this.maxRows); this.maxRows += count; }
+  getRowHeight() { return 24; }
+  setRowHeights(first, count, height) { this.rowHeights = [first, count, height]; }
   insertColumnsAfter(after, number) { assert.equal(after, this.maxColumns); this.maxColumns += number; this.writes++; }
   getColumnWidth() { return 80; }
   setColumnWidths() {}
@@ -102,6 +125,7 @@ function setup() {
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../Code.gs'), 'utf8'), context);
   const dm = vm.runInContext('DM', context);
   Object.assign(dm, { practiceCount: 3, studentsPerGroup: 2, commonLastRow: 5, logMaxRow: 20 });
+  dm.practiceCoefficientThresholds = {};
   const plusFiles = {};
   for (const practitioner of dm.practitioners) {
     const first = practitioner === 'Рами' ? 5 : 6;
@@ -110,6 +134,9 @@ function setup() {
       const sheet = new Sheet(`Практика ${practice}`, first + 29);
       for (let n = 1; n <= 30; n++) sheet.put(3, first + n - 1, n);
       sheet.put(4, 1, 'Студент'); sheet.put(5, 1, 'Второй');
+      const solvedCol = practitioner === 'Рами' ? 2 : 3;
+      sheet.formulas.set(`5:${solvedCol}`, '=0');
+      sheet.formulas.set(`5:${solvedCol + 1}`, '=0.5');
       sheets[sheet.name] = sheet;
     }
     plusFiles[practitioner] = { getSheetByName: name => sheets[name] || null };
@@ -226,7 +253,7 @@ test('force reapplies formulas with unchanged counts; shrink/grow round trip kee
     assert.equal(s.getRange(4, l.taskLastCol).getDisplayValue(), '');
     assert.ok(!s.hidden.has(l.taskLastCol));
     assert.equal(c.practiceTaskHeaders_(s, l).length, 30);
-    assert.equal(s.rules.length, 7);
+    assert.equal(s.rules.length, 8);
   }
 });
 
@@ -235,7 +262,7 @@ test('pending counts reject edits instead of deleting or creating log entries', 
   dm.practiceTaskCounts = { 2: 25 };
   const s = sheet('Артём', 2);
   const event = { range: s.getRange(4, 6), source: {} };
-  assert.throws(() => c.handlePlusEdit_(event, 'Артём'), /Применить количество задач/);
+  assert.throws(() => c.handlePlusEdit_(event, 'Артём'), /Применить задачи и коэффициенты/);
   assert.equal(s.writes, 0);
 });
 
@@ -351,6 +378,49 @@ test('custom coefficient boundaries are validated and used per practice', () => 
   }
 });
 
+test('expanded roster repairs row 34 and grows the grid without changing marks', () => {
+  const { context: c, dm, plusFiles, central, sheet } = setup();
+  dm.studentsPerGroup = 40;
+  dm.practiceTaskCounts = {};
+  for (const name of dm.practitioners) {
+    const s = sheet(name, 1), layout = c.plusLayout_(name, 1);
+    s.put(34, 1, 'Лазаренко Владислав Андреевич');
+    s.put(34, layout.taskFirstCol, '+');
+    s.put(4, layout.taskFirstCol, 1);
+    if (layout.presenceCol) s.put(34, layout.presenceCol, 'Да');
+  }
+  c.syncPracticeTaskLayouts_(central, plusFiles);
+  for (const name of dm.practitioners) {
+    const s = sheet(name, 1), layout = c.plusLayout_(name, 1);
+    assert.equal(s.getMaxRows(), 43);
+    assert.ok(s.formattedRows.has(34));
+    assert.equal(s.validations.get(34), 'Да,Нет');
+    assert.ok(s.getRange(34, layout.solvedCol).getFormulas()[0][0].includes('COUNTIF'));
+    assert.ok(s.getRange(43, layout.coefficientCol).getFormulas()[0][0].includes('1.25'));
+    assert.equal(s.getRange(34, 1).getDisplayValue(), 'Лазаренко Владислав Андреевич');
+    assert.equal(s.getRange(34, layout.taskFirstCol).getDisplayValue(), '+');
+    assert.equal(s.getRange(4, layout.taskFirstCol).getValues()[0][0], 1);
+    if (layout.presenceCol) assert.equal(s.getRange(34, layout.presenceCol).getDisplayValue(), 'Да');
+    assert.ok(s.rules.some(rule => rule.getRanges().some(range => range.height === 40)));
+  }
+  const writes = sheet('Немат', 1).writes;
+  c.syncPracticeTaskLayouts_(central, plusFiles);
+  assert.equal(sheet('Немат', 1).writes, writes);
+  c.syncPracticeTaskLayouts_(central, plusFiles, true);
+  assert.equal(sheet('Немат', 1).getRange(34, 6).getDisplayValue(), '+');
+});
+
+test('roster overflow stops synchronization before changing worksheets', () => {
+  const { context: c, plusFiles, logs, sheet } = setup();
+  const common = new Sheet('Общий', 14);
+  for (let i = 0; i < 3; i++) {
+    common.put(4 + i, 1, `Студент ${i}`);
+    common.put(4 + i, 2, 'Немат');
+  }
+  assert.throws(() => c.syncGroups_({ getSheetByName: name => name === 'Общий' ? common : logs }, plusFiles), /Немат: 3 студентов при лимите 2/);
+  assert.equal(sheet('Немат', 1).writes, 0);
+});
+
 test('D formulas still trim names after synchronization', () => {
   const { context: c, dm } = setup();
   const common = new Sheet('Общий', 14);
@@ -386,7 +456,7 @@ if (process.env.DM_BOT_BRIDGE_PATH) {
         assert.equal(result.students[0].slots, 2);
       }
       dm.practiceTaskCounts[2] = 24;
-      assert.throws(() => c.bridge_readDistributionProblem_(dm.practitioners.indexOf(name) + 1, 2), /Применить количество задач/);
+      assert.throws(() => c.bridge_readDistributionProblem_(dm.practitioners.indexOf(name) + 1, 2), /Применить задачи и коэффициенты/);
     });
   }
 }

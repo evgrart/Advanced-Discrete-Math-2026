@@ -18,7 +18,7 @@ const DM = {
     1: { '0.5': 0, '0.8': 10, '1': 20, '1.25': 28},
     2: { '0.5': 0, '0.8': 25, '1': 25, '1.25': 25 }
   },
-  studentsPerGroup: 30,
+  studentsPerGroup: 40,
   plusHeaderRow: 3,
   plusFirstRow: 4,
   plusCoefficientCol: 4,
@@ -556,7 +556,10 @@ function syncPracticeTaskLayouts_(central, plusFiles, force) {
       const layout = plusLayout_(practitioner, practice);
       const headers = practiceTaskHeaders_(sheet, layout);
       const count = practiceTaskCount_(practice);
-      if (headers.length === count && !force) continue;
+      const lastStudentRow = DM.plusFirstRow + DM.studentsPerGroup - 1;
+      const hasStudentFormulas = sheet.getMaxRows() >= lastStudentRow &&
+        sheet.getRange(lastStudentRow, layout.solvedCol, 1, 2).getFormulas()[0].every(Boolean);
+      if (headers.length === count && hasStudentFormulas && !force) continue;
       if (!headers.length) throw new Error(`На листе «${sheet.getName()}» у ${practitioner} нет шаблона задач.`);
       const oldLast = layout.taskFirstCol + headers.length - 1;
       if (count < headers.length) {
@@ -597,6 +600,9 @@ function applyPracticeTaskLayout_(plan) {
   if (layout.taskLastCol > sheet.getMaxColumns()) {
     sheet.insertColumnsAfter(sheet.getMaxColumns(), layout.taskLastCol - sheet.getMaxColumns());
   }
+  if (lastRow > sheet.getMaxRows()) {
+    sheet.insertRowsAfter(sheet.getMaxRows(), lastRow - sheet.getMaxRows());
+  }
   if (count > headers.length) {
     sheet.getRange(DM.plusHeaderRow, oldLast, lastRow - DM.plusHeaderRow + 1, 1)
       .copyFormatToRange(sheet, oldLast + 1, layout.taskLastCol, DM.plusHeaderRow, lastRow);
@@ -608,6 +614,15 @@ function applyPracticeTaskLayout_(plan) {
   sheet.showColumns(layout.taskFirstCol, count);
   sheet.getRange(DM.plusHeaderRow, layout.taskFirstCol, 1, count).setValues([nextHeaders])
     .setBackground('#FFF2CC').setFontColor('#000000').setFontWeight('bold');
+  if (DM.studentsPerGroup > 1) {
+    const template = sheet.getRange(firstRow, 1, 1, layout.taskLastCol);
+    const destination = sheet.getRange(firstRow + 1, 1, DM.studentsPerGroup - 1, layout.taskLastCol);
+    destination.breakApart();
+    template.copyFormatToRange(sheet, 1, layout.taskLastCol, firstRow + 1, lastRow);
+    const validations = template.getDataValidations()[0];
+    destination.setDataValidations(Array.from({ length: DM.studentsPerGroup - 1 }, () => validations.slice()));
+    sheet.setRowHeights(firstRow + 1, DM.studentsPerGroup - 1, sheet.getRowHeight(firstRow));
+  }
   sheet.getRange(firstRow, layout.taskFirstCol, DM.studentsPerGroup, count).setNumberFormat('@');
   sheet.getRange(firstRow, layout.solvedCol, DM.studentsPerGroup, 2).setFormulas(plusCountFormulas_(layout, count, practice));
   refreshPracticeTaskColors_(sheet, layout, Math.max(oldLast, layout.taskLastCol), count, practice);
@@ -730,7 +745,6 @@ function syncGroups_(central, plusFiles, forceTaskLayout) {
   try {
     central = central || SpreadsheetApp.openById(getCentralId_());
     plusFiles = openPlusFiles_(plusFiles);
-    syncPracticeTaskLayouts_(central, plusFiles, forceTaskLayout);
     const commonRows = central.getSheetByName(DM.common).getRange(DM.commonFirstRow, 1, 90, 4).getDisplayValues();
     const groups = [[], [], []];
     commonRows.forEach(row => {
@@ -738,6 +752,12 @@ function syncGroups_(central, plusFiles, forceTaskLayout) {
       const name = String(row[0]).trim();
       if (practitionerNo >= 0 && name) groups[practitionerNo].push({ name, tg: row[2] });
     });
+    groups.forEach((group, index) => {
+      if (group.length > DM.studentsPerGroup) {
+        throw new Error(`${DM.practitioners[index]}: ${group.length} студентов при лимите ${DM.studentsPerGroup}. Увеличьте studentsPerGroup; синхронизация отменена, чтобы не обрезать список.`);
+      }
+    });
+    syncPracticeTaskLayouts_(central, plusFiles, forceTaskLayout);
     syncCwRoster_(central);
     const snapshots = collectSnapshots_(plusFiles);
 
