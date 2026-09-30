@@ -119,7 +119,14 @@ function ruleBuilder() {
 
 function setup() {
   const context = vm.createContext({
-    SpreadsheetApp: { newConditionalFormatRule: ruleBuilder, flush() {} },
+    SpreadsheetApp: {
+      newConditionalFormatRule: ruleBuilder, flush() {},
+      newDataValidation: () => ({
+        requireValueInList(values, show) { this.values = values; this.show = show; return this; },
+        setAllowInvalid(value) { this.allowInvalid = value; return this; },
+        build() { return { values: this.values, show: this.show, allowInvalid: this.allowInvalid }; }
+      })
+    },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) }
   });
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../Code.gs'), 'utf8'), context);
@@ -135,8 +142,9 @@ function setup() {
       for (let n = 1; n <= 30; n++) sheet.put(3, first + n - 1, n);
       sheet.put(4, 1, 'Студент'); sheet.put(5, 1, 'Второй');
       const solvedCol = practitioner === 'Рами' ? 2 : 3;
-      sheet.formulas.set(`5:${solvedCol}`, '=0');
-      sheet.formulas.set(`5:${solvedCol + 1}`, '=0.5');
+      const initialFormulas = context.plusCountFormulas_(context.plusLayout_(practitioner), 30)[1];
+      sheet.formulas.set(`5:${solvedCol}`, initialFormulas[0]);
+      sheet.formulas.set(`5:${solvedCol + 1}`, initialFormulas[1]);
       sheets[sheet.name] = sheet;
     }
     plusFiles[practitioner] = { getSheetByName: name => sheets[name] || null };
@@ -419,6 +427,41 @@ test('roster overflow stops synchronization before changing worksheets', () => {
   }
   assert.throws(() => c.syncGroups_({ getSheetByName: name => name === 'Общий' ? common : logs }, plusFiles), /Немат: 3 студентов при лимите 2/);
   assert.equal(sheet('Немат', 1).writes, 0);
+});
+
+test('presence dropdown follows roster, restores on new student, and preserves values', () => {
+  const { context: c, dm, sheet } = setup();
+  for (const name of ['Артём', 'Немат']) {
+    const s = sheet(name, 1), layout = c.plusLayout_(name, 1);
+    s.put(4, 2, 'Да'); s.put(5, 2, 'Нет');
+    const before = JSON.stringify(s.data);
+    c.syncPresenceValidation_(s, layout, [['Студент'], [' ']]);
+    assert.equal(s.validations.get(4), 'Да,Нет');
+    assert.equal(s.validations.get(5), null);
+    assert.equal(JSON.stringify(s.data), before);
+    c.syncPresenceValidation_(s, layout, [[''], ['']]);
+    assert.equal(s.validations.get(4), null);
+    c.syncPresenceValidation_(s, layout, [[''], ['Новый студент']]);
+    assert.equal(s.validations.get(4), null);
+    assert.deepEqual(Array.from(s.validations.get(5).values), ['Да', 'Нет']);
+    assert.equal(JSON.stringify(s.data), before);
+  }
+  const rami = sheet('Рами', 1);
+  c.syncPresenceValidation_(rami, c.plusLayout_('Рами', 1), [[''], ['']]);
+  assert.equal(rami.validations.get(4), 'Да,Нет');
+});
+
+test('ordinary synchronization replaces old coefficient thresholds without changing marks', () => {
+  const { context: c, dm, plusFiles, central, sheet } = setup();
+  dm.practiceCoefficientThresholds = { 2: { '0.5': 0, '0.8': 25, '1': 25, '1.25': 25 } };
+  c.syncPracticeTaskLayouts_(central, plusFiles);
+  const s = sheet('Немат', 2);
+  s.put(4, 6, '+'); s.put(4, 7, 1);
+  const before = JSON.stringify(s.data);
+  dm.practiceCoefficientThresholds[2] = { '0.5': 0, '0.8': 9, '1': 15, '1.25': 24 };
+  c.syncPracticeTaskLayouts_(central, plusFiles);
+  assert.equal(s.getRange(4, 4).getFormulas()[0][0], '=IF(A4="","",IF(C4>=24,1.25,IF(C4>=15,1,IF(C4>=9,0.8,0.5))))');
+  assert.equal(JSON.stringify(s.data), before);
 });
 
 test('D formulas still trim names after synchronization', () => {

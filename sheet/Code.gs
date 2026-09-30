@@ -13,10 +13,10 @@ const DM = {
   plusLogs: 'Логи',
   practiceCount: 15,
   defaultTaskCount: 30,
-  practiceTaskCounts: { 1: 30, 2: 25 },
+  practiceTaskCounts: { 1: 30, 2: 25, 3: 25 },
   practiceCoefficientThresholds: {
     1: { '0.5': 0, '0.8': 10, '1': 20, '1.25': 28},
-    2: { '0.5': 0, '0.8': 25, '1': 25, '1.25': 25 }
+    2: { '0.5': 0, '0.8': 9, '1': 15, '1.25': 24 }
   },
   studentsPerGroup: 40,
   plusHeaderRow: 3,
@@ -557,8 +557,10 @@ function syncPracticeTaskLayouts_(central, plusFiles, force) {
       const headers = practiceTaskHeaders_(sheet, layout);
       const count = practiceTaskCount_(practice);
       const lastStudentRow = DM.plusFirstRow + DM.studentsPerGroup - 1;
+      const expectedFormulas = plusCountFormulas_(layout, count, practice)[DM.studentsPerGroup - 1];
       const hasStudentFormulas = sheet.getMaxRows() >= lastStudentRow &&
-        sheet.getRange(lastStudentRow, layout.solvedCol, 1, 2).getFormulas()[0].every(Boolean);
+        sheet.getRange(lastStudentRow, layout.solvedCol, 1, 2).getFormulas()[0]
+          .every((formula, index) => formula === expectedFormulas[index]);
       if (headers.length === count && hasStudentFormulas && !force) continue;
       if (!headers.length) throw new Error(`На листе «${sheet.getName()}» у ${practitioner} нет шаблона задач.`);
       const oldLast = layout.taskFirstCol + headers.length - 1;
@@ -878,6 +880,15 @@ function collectSnapshots_(plusFiles) {
   return snapshots;
 }
 
+function syncPresenceValidation_(sheet, layout, names) {
+  if (!layout.presenceCol) return;
+  const range = sheet.getRange(DM.plusFirstRow, layout.presenceCol, names.length, 1);
+  const existing = range.getDataValidations().map(row => row[0]).find(Boolean);
+  const rule = existing || SpreadsheetApp.newDataValidation()
+    .requireValueInList(['Да', 'Нет'], true).setAllowInvalid(false).build();
+  range.setDataValidations(names.map(row => [String(row[0] == null ? '' : row[0]).trim() ? rule : null]));
+}
+
 function syncVisibility_(central, plusFiles, sheetStates) {
   central = central || SpreadsheetApp.openById(getCentralId_());
   plusFiles = openPlusFiles_(plusFiles);
@@ -896,6 +907,7 @@ function syncVisibility_(central, plusFiles, sheetStates) {
       const names = state
         ? state.names
         : sheet.getRange(first, 1, DM.studentsPerGroup, 1).getDisplayValues();
+      syncPresenceValidation_(sheet, plusLayout_(practitioner, practice), names);
       sheet.showRows(first, DM.studentsPerGroup);
       let hiddenStart = -1;
       for (let offset = 0; offset <= names.length; offset++) {
