@@ -24,7 +24,7 @@
 
 ## Курс
 
-### Практика 1. Intro | [ser-1](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/practice_sheets/ser1.pdf)
+### Практика 1. Intro | [ser-1](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/practice_sheets/practice1.pdf)
 
 > Знакомство и правила курса. Популярные сюжеты в задачах и методы доказательства.
 
@@ -38,7 +38,7 @@
 > Классическая олимпиадная книжка. Много хороших задачек на все те темы и методы, которые мы успели посмотреть на практике. Особенно полезны будут разделы про четность, инвариант и принцип Дирихле.
 
 ---
-### Практика 2. Множества, функции, отношения | [ser-2](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/practice_sheets/ser2.pdf)
+### Практика 2. Множества, функции, отношения | [ser-2](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/practice_sheets/practice2.pdf)
 
 > Знакомство с теорией множеств и полезными объектами на ее базе, которые мы далее будем использовать везде. 
 
@@ -51,3 +51,13 @@
 + [Аксиома выбора: как Георг Кантор чуть не сломал математику [Veritasium]](https://www.youtube.com/watch?v=Nc8Pxx24f-k)
 > Хорошее видео про аксиому выбора, которую вам внезапно дропнули на лекцию.
 + [Очень важное видео](https://www.youtube.com/shorts/Rn0fsVYIex4)
+
+
+---
+### Практика 3. Множества и отображения | [ser-3](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/practice_sheets/practice3.pdf)
+
+> Продолжаем работать с множествами: научимся считать количество элементов в них.
+
+Материалы:
++ [Шень. Начала теории множеств](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/literature/Vereschagin_N_K_-_Chast_1_Nachala_teorii_mnozhestv_-_2012.pdf)
++ [Хороший видос](https://youtu.be/6WiISIpWVi8?si=63IGVRmKcat8Mq5H)
