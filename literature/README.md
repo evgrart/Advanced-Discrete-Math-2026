@@ -11,3 +11,4 @@
 - [Начала теории множеств](Vereschagin_N_K_-_Chast_1_Nachala_teorii_mnozhestv_-_2012.pdf)
 - [Ленинградские математические кружки](ЛЕНИНГРАДСКИЕ%20МАТЕМАТИЧЕСКИЕ%20КРУЖКИ.pdf)
 - [Производящие функции](lando-genfunc.pdf)
+- [Иванов. Элементарная математика](Ivanov_Oleg_Elementarnaya_matematika_dlya_shkolnikov_studentov_i.pdf)
