@@ -13,10 +13,23 @@ const DM = {
   plusLogs: 'Логи',
   practiceCount: 15,
   defaultTaskCount: 30,
-  practiceTaskCounts: { 1: 30, 2: 25, 3: 25 },
+  practiceTaskCounts: { 1: 30, 2: 25, 3: 25, 4: 25, 5: 25, 6 : 25},
   practiceCoefficientThresholds: {
     1: { '0.5': 0, '0.8': 10, '1': 20, '1.25': 28},
-    2: { '0.5': 0, '0.8': 9, '1': 15, '1.25': 24 }
+    2: { '0.5': 0, '0.8': 9, '1': 15, '1.25': 24 },
+    3: { '0.5': 0, '0.8': 6, '1': 14, '1.25': 18 },
+    4: { '0.5': 0, '0.8': 7, '1': 13, '1.25': 19 },
+    5: { '0.5': 0, '0.8': 7, '1': 12, '1.25': 17 },
+    6: { '0.5': 0, '0.8': 23, '1': 24, '1.25': 25 },
+    7: { '0.5': 0, '0.8': 23, '1': 24, '1.25': 25 },
+    8: { '0.5': 0, '0.8': 23, '1': 24, '1.25': 25 },
+    9: { '0.5': 0, '0.8': 23, '1': 24, '1.25': 25 },
+    10: { '0.5': 0, '0.8': 23, '1': 24, '1.25': 25 },
+    11: { '0.5': 0, '0.8': 23, '1': 24, '1.25': 25 },
+    12: { '0.5': 0, '0.8': 23, '1': 24, '1.25': 25 },
+    13: { '0.5': 0, '0.8': 23, '1': 24, '1.25': 25 },
+    14: { '0.5': 0, '0.8': 23, '1': 24, '1.25': 25 },
+    15: { '0.5': 0, '0.8': 23, '1': 24, '1.25': 25 }
   },
   studentsPerGroup: 40,
   plusHeaderRow: 3,
@@ -325,10 +338,8 @@ function appendNormalLog_(central, plusFile, plusSheet, practitionerNo,
   let duplicateCount = 0;
 
   rows.forEach(row => {
-    const penalty = String(row[5]).trim() === '' && String(row[6]).trim() === '' && Number(row[7]) === -2;
-    const departureOrTransfer = ['ушел на базу', 'переведен из'].some(status => String(row[8]).indexOf(status) === 0);
-    if (String(row[0]).trim() !== studentName || penalty || departureOrTransfer) return;
-    studentExit++;
+    if (String(row[0]).trim() !== studentName || !isNormalLogRow_(row)) return;
+    if (Number(row[2]) <= practiceNo) studentExit++;
     if (Number(row[2]) === practiceNo) pairCount++;
     if (Number(row[2]) === practiceNo && tasksEqual_(row[3], taskName)) duplicateCount++;
   });
@@ -970,6 +981,16 @@ function clearPlusNotes_(plusFiles) {
   });
 }
 
+function isNormalLogRow_(row) {
+  const practice = Number(row[2]);
+  const status = String(row[8] == null ? '' : row[8]).trim();
+  return String(row[0] == null ? '' : row[0]).trim() !== '' &&
+    Number.isInteger(practice) && practice > 0 &&
+    String(row[3] == null ? '' : row[3]).trim() !== '' &&
+    row[5] !== '' && row[5] != null &&
+    !['ушел на базу', 'переведен из'].some(prefix => status.indexOf(prefix) === 0);
+}
+
 function refreshLogCoefficients_(central, plusFiles, sheetStates) {
   const coefficients = {};
   plusFiles = openPlusFiles_(plusFiles);
@@ -1005,24 +1026,30 @@ function refreshLogCoefficients_(central, plusFiles, sheetStates) {
   if (lastRow < DM.logFirstRow) return;
   const count = lastRow - DM.logFirstRow + 1;
   const rows = logs.getRange(DM.logFirstRow, 1, count, 9).getValues();
-  const resultFormulas = logs.getRange(DM.logFirstRow, 8, count, 1).getFormulas();
-  const coefficientAndResult = rows.map((row, index) => [
-    row[6],
-    resultFormulas[index][0] || row[7]
-  ]);
-  rows.forEach((row, index) => {
-    const base = row[5];
-    const student = String(row[0] == null ? '' : row[0]).trim();
+  const formulas = logs.getRange(DM.logFirstRow, 5, count, 5).getFormulas();
+  const calculated = rows.map((row, index) =>
+    row.slice(4, 9).map((value, column) => formulas[index][column] || value));
+  const ordered = rows.map((row, index) => ({ row, index }))
+    .filter(entry => isNormalLogRow_(entry.row))
+    .sort((a, b) => Number(a.row[2]) - Number(b.row[2]) || a.index - b.index);
+  const exits = new Map();
+  ordered.forEach(({ row, index }) => {
+    const student = String(row[0]).trim();
     const practice = Number(row[2]);
     const key = student + '|' + practice;
-    const isNormal = student && practice && base !== '' && base != null && coefficients[key] != null;
-    if (!isNormal) return;
-    coefficientAndResult[index][0] = coefficients[key];
+    const exitNo = (exits.get(student) || 0) + 1;
+    exits.set(student, exitNo);
+    calculated[index][0] = exitNo;
+    calculated[index][1] = ladderPoints_(exitNo);
+    if (coefficients[key] != null) calculated[index][2] = coefficients[key];
     const targetRow = DM.logFirstRow + index;
-    coefficientAndResult[index][1] =
+    calculated[index][3] =
       `=IF(OR(F${targetRow}="",G${targetRow}=""),"",F${targetRow}*G${targetRow}+IF(J${targetRow}="",0,J${targetRow}))`;
+    if (['', 'Назначен', 'Дополнительный выход'].includes(String(row[8]).trim())) {
+      calculated[index][4] = exitNo > 15 ? 'Дополнительный выход' : 'Назначен';
+    }
   });
-  logs.getRange(DM.logFirstRow, 7, count, 2).setValues(coefficientAndResult);
+  logs.getRange(DM.logFirstRow, 5, count, 5).setValues(calculated);
 }
 
 function reconcilePlusResults_(central, plusFiles, sheetStates) {

@@ -48,6 +48,8 @@ class Range {
   getNumRows() { return this.height; }
   getSheet() { return this.sheet; }
   getDisplayValue() { return this.getDisplayValues()[0][0]; }
+  getValue() { return this.getValues()[0][0]; }
+  setFormula(value) { return this.setFormulas([[value]]); }
   clearNote() { return this; }
   breakApart() { this.sheet.unmerged = true; return this; }
   getDataValidations() {
@@ -154,6 +156,100 @@ function setup() {
   return { context, dm, plusFiles, central, logs,
     sheet: (name, practice) => plusFiles[name].getSheetByName(`Практика ${practice}`) };
 }
+
+test('late practice 2 exit renumbers Roman by series and preserves log identity and adjustments', () => {
+  const { context: c, logs, central, plusFiles, sheet } = setup();
+  const name = 'Крылов Роман Рустамович';
+  for (let practice = 1; practice <= 3; practice++) {
+    sheet('Артём', practice).put(4, 1, name);
+    sheet('Артём', practice).put(4, 4, practice === 3 ? 0.5 : 1);
+  }
+  const original = [1, 2, 3, 2].map((practice, i) => [
+    name, 'Артём', practice, i + 1, i + 1, i === 3 ? 5 : 6,
+    practice === 3 ? 0.5 : 1, 0, 'Назначен', i === 0 ? 0.25 : '', new Date(2026, 8, i + 1)
+  ]);
+  logs.getRange(4, 1, 4, 11).setValues(original);
+  c.refreshLogCoefficients_(central, plusFiles);
+  const result = logs.getRange(4, 1, 4, 11).getValues();
+  assert.deepEqual(result.map(row => row[4]), [1, 2, 4, 3]);
+  assert.deepEqual(result.map(row => row[5]), [6, 6, 5, 6]);
+  assert.equal(result.filter(row => row[2] === 2).reduce((n, row) => n + row[5] * row[6], 0), 12);
+  assert.equal(result[2][5] * result[2][6], 2.5);
+  result.forEach((row, i) => {
+    assert.deepEqual(row.slice(0, 4), original[i].slice(0, 4));
+    assert.deepEqual(row.slice(9), original[i].slice(9));
+    assert.match(row[7], new RegExp(`F${i + 4}\\*G${i + 4}`));
+    assert.ok(row[7].includes(`IF(J${i + 4}="",0,J${i + 4})`));
+  });
+  c.refreshLogCoefficients_(central, plusFiles);
+  assert.deepEqual(logs.getRange(4, 1, 4, 11).getValues(), result);
+  logs.getRange(4, 1, 1, 11).clearContent();
+  c.refreshLogCoefficients_(central, plusFiles);
+  assert.deepEqual(logs.getRange(5, 5, 3, 2).getValues(), [[1, 6], [3, 6], [2, 6]]);
+});
+
+test('series ordering is numeric, independent per student and excludes penalties and status rows', () => {
+  const { context: c, logs, central, plusFiles } = setup();
+  const rows = [
+    ['Ушедший', 'Рами', '10', 2, 1, 6, 0.8, 4.8, 'Особая отметка', 2, 'date'],
+    ['Ушедший', 'Артём', 2, 1, 2, 6, 1, 6, 'Назначен', '', 'date'],
+    ['Другой', 'Немат', 1, 1, 9, 4, 0.5, 2, 'Назначен', '', 'date'],
+    ['Ушедший', 'Рами', 1, 3, '', '', '', -2, '', '', 'date'],
+    ['Ушедший', 'Рами', '', '', '', '', '', '', 'переведен из Артём в Рами', '', 'date'],
+    ['Ушедший', 'Рами', '', '', '', '', '', '', 'ушел на базу', '', 'date'],
+    Array(11).fill(''),
+    ['Ушедший', 'Рами', 10, 3, 3, 6, 0.8, 4.8, 'Назначен', '', 'date']
+  ];
+  logs.getRange(4, 1, rows.length, 11).setValues(rows);
+  logs.getRange(7, 8).setFormula('=-2');
+  c.refreshLogCoefficients_(central, plusFiles);
+  const result = logs.getRange(4, 1, rows.length, 11).getValues();
+  assert.deepEqual(result.map(row => row[4]), [2, 1, 1, '', '', '', '', 3]);
+  assert.equal(result[0][6], 0.8, 'retain coefficient for student absent from current rosters');
+  assert.equal(result[0][8], 'Особая отметка');
+  assert.equal(result[3][7], '=-2');
+  for (const index of [4, 5, 6]) assert.deepEqual(result[index], rows[index]);
+});
+
+test('reindexing covers the whole ladder including zero-base exits and removal at exit 15', () => {
+  const { context: c, dm, logs, central, plusFiles } = setup();
+  dm.logMaxRow = 30;
+  const rows = Array.from({ length: 16 }, (_, i) => [
+    'История', 'Артём', Math.floor(i / 2) + 1, i % 2 + 1,
+    i + 1, c.ladderPoints_(i + 1), 1, 0,
+    i === 15 ? 'Дополнительный выход' : 'Назначен', '', ''
+  ]).reverse();
+  logs.getRange(4, 1, rows.length, 11).setValues(rows);
+  c.refreshLogCoefficients_(central, plusFiles);
+  const result = logs.getRange(4, 1, rows.length, 11).getValues();
+  assert.deepEqual(result.map(row => row[4]), [15, 16, 13, 14, 11, 12, 9, 10, 7, 8, 5, 6, 3, 4, 1, 2]);
+  assert.deepEqual(result.slice().sort((a, b) => a[4] - b[4]).map(row => row[5]),
+    [6, 6, 6, 5, 5, 5, 4, 4, 4, 3, 3, 3, 2, 2, 2, 0]);
+  assert.equal(result[0][8], 'Назначен');
+  assert.equal(result[1][8], 'Дополнительный выход');
+  logs.getRange(19, 1, 1, 11).clearContent();
+  c.refreshLogCoefficients_(central, plusFiles);
+  assert.equal(logs.getRange(5, 5).getValue(), 15);
+  assert.equal(logs.getRange(5, 6).getValue(), 2);
+  assert.equal(logs.getRange(5, 9).getValue(), 'Назначен');
+});
+
+test('appending a backdated series uses earlier series only and retains duplicate and two-exit guards', () => {
+  const { context: c, logs, central, plusFiles, sheet } = setup();
+  c.isStudentActive_ = () => true;
+  logs.getRange(4, 1, 3, 11).setValues([1, 2, 3].map((practice, i) => [
+    'Студент', 'Артём', practice, 1, i + 1, 6, 1, 6, 'Назначен', '', ''
+  ]));
+  sheet('Артём', 2).put(4, 4, 1);
+  const append = task => c.appendNormalLog_(central, plusFiles['Артём'], sheet('Артём', 2),
+    1, 'Артём', 2, 'Студент', task);
+  assert.match(append(1).message, /уже есть в логах/);
+  assert.equal(append(2).ok, true);
+  assert.deepEqual(logs.getRange(7, 5, 1, 3).getValues(), [[3, 6, 1]]);
+  assert.match(append(3).message, /уже два выхода/);
+  c.refreshLogCoefficients_(central, plusFiles);
+  assert.deepEqual(logs.getRange(6, 5, 1, 2).getValues(), [[4, 5]]);
+});
 
 test('config applies shared counts, default, different Rami offset, and validates inputs', () => {
   const { context: c, dm } = setup();
