@@ -11,6 +11,7 @@ const DM = {
   ranking: 'Рейтинг',
   logs: 'Логи',
   plusLogs: 'Логи',
+  cwRequiredSolvedTasks: { 1: 4, 2: 4 },
   practiceCount: 15,
   defaultTaskCount: 30,
   practiceTaskCounts: { 1: 30, 2: 25, 3: 25, 4: 25, 5: 25, 6 : 25},
@@ -94,6 +95,7 @@ function onOpen() {
     .addItem('Настроить 4 файла', 'installDmSystem')
     .addItem('Синхронизировать группы', 'syncGroups_')
     .addItem('Применить задачи и коэффициенты', 'applyPracticeTaskCounts')
+    .addItem('Применить настройки КР', 'applyControlWorkSettings')
     .addItem('Синхронизировать таблицу', 'syncTable');
   if (typeof telegramMenu_ === 'function') {
     menu.addSubMenu(telegramMenu_(ui));
@@ -695,11 +697,89 @@ function refreshCentral_legacy() {
   refreshPlusTotals_(central);
 }
 
-function krStatusFormula_(row, firstRow, lastRow) {
-  const parts = ['E', 'F', 'G', 'H', 'I'].map(col =>
+function cwBlocks_() {
+  return [
+    { kr: 1, headerRow: 1, firstRow: 3, lastRow: 92 },
+    { kr: 2, headerRow: 95, firstRow: 96, lastRow: 185 }
+  ];
+}
+
+function validateControlWorkSettings_() {
+  const thresholds = DM.cwRequiredSolvedTasks;
+  if (!thresholds || Array.isArray(thresholds) || typeof thresholds !== 'object' ||
+      Object.keys(thresholds).length !== 2 ||
+      ![1, 2].every(kr => Number.isInteger(thresholds[kr]) && thresholds[kr] >= 1 && thresholds[kr] <= 6)) {
+    throw new Error('cwRequiredSolvedTasks: укажите порог от 1 до 6 задач для каждой КР, например { 1: 4, 2: 4 }.');
+  }
+}
+
+function applyControlWorkSettings() {
+  validateControlWorkSettings_();
+  const lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    const central = SpreadsheetApp.openById(getCentralId_());
+    syncControlWorkLayout_(central);
+    refreshCentral_(central);
+    central.toast('В обеих КР по 6 задач. Пороги зачёта и баллы обновлены.');
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+function syncControlWorkLayout_(central) {
+  validateControlWorkSettings_();
+  const sheet = central.getSheetByName(DM.cw);
+  const blocks = cwBlocks_();
+  if (!sheet) throw new Error(`Нет листа «${DM.cw}».`);
+  blocks.forEach(block => {
+    const header = sheet.getMaxColumns() >= 10
+      ? String(sheet.getRange(block.headerRow, 10).getDisplayValue()).trim() : '';
+    if (header && header !== '6') {
+      throw new Error(`КР-${block.kr}: столбец J занят («${header}»). Освободите его для шестой задачи.`);
+    }
+  });
+  if (sheet.getMaxColumns() < 10) sheet.insertColumnsAfter(sheet.getMaxColumns(), 10 - sheet.getMaxColumns());
+  const scoreValidation = SpreadsheetApp.newDataValidation().requireNumberBetween(0, 4).setAllowInvalid(false).build();
+  blocks.forEach(block => {
+    const { kr, headerRow, firstRow, lastRow } = block;
+    if (!String(sheet.getRange(headerRow, 10).getDisplayValue()).trim()) {
+      sheet.getRange(headerRow, 9, lastRow - headerRow + 1, 1)
+        .copyFormatToRange(sheet, 10, 10, headerRow, lastRow);
+      sheet.setColumnWidths(10, 1, sheet.getColumnWidth(9));
+    }
+    sheet.getRange(headerRow, 10).setValues([['6']]);
+    const count = lastRow - firstRow + 1;
+    sheet.getRange(firstRow, 5, count, 6).setDataValidations(
+      Array.from({ length: count }, () => Array(6).fill(scoreValidation)));
+    sheet.getRange(firstRow, 4, count, 1).setFormulas(Array.from({ length: count }, (_, offset) => {
+      const row = firstRow + offset;
+      return [`=IF(A${row}="","",SUM(E${row}:J${row})*IF(C${row}="",1,1/2^(C${row}-1)))`];
+    }));
+  });
+  const rules = [];
+  sheet.getConditionalFormatRules().forEach(rule => {
+    const ranges = rule.getRanges().filter(range => !blocks.some(block =>
+      range.getColumn() === 1 && range.getNumColumns() === 1 &&
+      range.getRow() === block.firstRow && range.getNumRows() === block.lastRow - block.firstRow + 1));
+    if (ranges.length) rules.push(rule.copy().setRanges(ranges).build());
+  });
+  blocks.forEach(({ kr, firstRow, lastRow }) => {
+    rules.push(SpreadsheetApp.newConditionalFormatRule()
+      .whenFormulaSatisfied(`=AND($A${firstRow}<>"",COUNTIF(E${firstRow}:J${firstRow},">=3")>=${DM.cwRequiredSolvedTasks[kr]})`)
+      .setBackground('#C6E0B4').setFontColor('#000000')
+      .setRanges([sheet.getRange(firstRow, 1, lastRow - firstRow + 1, 1)]).build());
+  });
+  sheet.setConditionalFormatRules(rules);
+}
+
+function krStatusFormula_(row, kr) {
+  validateControlWorkSettings_();
+  const { firstRow, lastRow } = cwBlocks_().find(block => block.kr === kr);
+  const parts = ['E', 'F', 'G', 'H', 'I', 'J'].map(col =>
     `COUNTIFS('${DM.cw}'!$A$${firstRow}:$A$${lastRow},A${row},'${DM.cw}'!$${col}$${firstRow}:$${col}$${lastRow},">=3")`
   );
-  return `=IF(A${row}="","",IF(${parts.join('+')}>=4,"зачет","незачет"))`;
+  return `=IF(A${row}="","",IF(${parts.join('+')}>=${DM.cwRequiredSolvedTasks[kr]},"зачет","незачет"))`;
 }
 
 function finalGradeFormula_(row) {
@@ -707,6 +787,7 @@ function finalGradeFormula_(row) {
 }
 
 function refreshCentral_(central, plusFiles, sheetStates) {
+  validateControlWorkSettings_();
   central = central || SpreadsheetApp.openById(getCentralId_());
   plusFiles = openPlusFiles_(plusFiles);
   SpreadsheetApp.flush();
@@ -719,8 +800,8 @@ function refreshCentral_(central, plusFiles, sheetStates) {
     mainFormulas.push([
       `=IF(A${row}="","",SUMIF('${DM.logs}'!$A$${DM.logFirstRow}:$A$${DM.logMaxRow},TRIM(A${row}),'${DM.logs}'!$H$${DM.logFirstRow}:$H$${DM.logMaxRow}))`,
       `=IF(A${row}="","",SUMIF('${DM.cw}'!$A:$A,A${row},'${DM.cw}'!$D:$D))`,
-      krStatusFormula_(row, 3, 92),
-      krStatusFormula_(row, 96, 185),
+      krStatusFormula_(row, 1),
+      krStatusFormula_(row, 2),
       `=IF(A${row}="","",IF(AND(E${row}+IF(K${row}="",0,K${row})>=55,F${row}+IF(J${row}="",0,J${row})>=24),"S",IF(AND(E${row}+IF(K${row}="",0,K${row})>=35,F${row}+IF(J${row}="",0,J${row})>=14),"A",IF(E${row}+IF(K${row}="",0,K${row})>=17,"B","F"))))`
     ]);
     gradeFormulas.push([finalGradeFormula_(row)]);
@@ -728,6 +809,7 @@ function refreshCentral_(central, plusFiles, sheetStates) {
   common.getRange(DM.commonFirstRow, 5, count, 5).setFormulas(mainFormulas);
   common.getRange(DM.commonFirstRow, 14, count, 1).setFormulas(gradeFormulas);
   SpreadsheetApp.flush();
+  syncCwVisibility_(central);
   refreshRanking_(central);
   refreshPlusTotals_(central, plusFiles, sheetStates);
 }
@@ -735,15 +817,10 @@ function refreshCentral_(central, plusFiles, sheetStates) {
 function refreshRanking_(central) {
   const common = central.getSheetByName(DM.common);
   const ranking = central.getSheetByName(DM.ranking);
-  const rows = common.getRange(DM.commonFirstRow, 1, 90, 9).getDisplayValues()
+  const rows = common.getRange(DM.commonFirstRow, 1, 90, 9).getValues()
     .filter(row => String(row[0]).trim() && isActiveValue_(row[3]))
     .map(row => [row[0], row[1], row[4], row[5], row[8]]);
-  const tierOrder = { 'S': 0, 'A': 1, 'B': 2, 'F': 3 };
   rows.sort((a, b) => {
-    const tierA = tierOrder[a[4]] === undefined ? 99 : tierOrder[a[4]];
-    const tierB = tierOrder[b[4]] === undefined ? 99 : tierOrder[b[4]];
-    const tier = tierA - tierB;
-    if (tier) return tier;
     const total = (toNumber_(b[2]) + toNumber_(b[3])) - (toNumber_(a[2]) + toNumber_(a[3]));
     if (total) return total;
     return String(a[0]).localeCompare(String(b[0]));
@@ -825,26 +902,25 @@ function syncGroups_(central, plusFiles, forceTaskLayout) {
 }
 
 function syncCwRoster_(central) {
+  syncControlWorkLayout_(central);
   const commonRows = central.getSheetByName(DM.common).getRange(DM.commonFirstRow, 1, 90, 2).getDisplayValues();
   const cw = central.getSheetByName(DM.cw);
-  const saved = {};
-  [3, 96].forEach(firstRow => {
-    cw.getRange(firstRow, 1, 90, 9).getValues().forEach(row => {
+  cwBlocks_().forEach(({ firstRow }) => {
+    const saved = new Map();
+    cw.getRange(firstRow, 1, 90, 10).getValues().forEach(row => {
       const name = String(row[0] == null ? '' : row[0]).trim();
       if (!name) return;
-      saved[name] = { attempt: row[2], scores: row.slice(4, 9) };
+      saved.set(name, { attempt: row[2], scores: row.slice(4, 10) });
     });
-  });
-  [3, 96].forEach(firstRow => {
     const roster = [];
     const scores = [];
     commonRows.forEach(row => {
-      const previous = saved[String(row[0]).trim()];
+      const previous = saved.get(String(row[0]).trim());
       roster.push([row[0], row[1], previous ? previous.attempt : '']);
-      scores.push(previous ? previous.scores : ['', '', '', '', '']);
+      scores.push(previous ? previous.scores : ['', '', '', '', '', '']);
     });
     cw.getRange(firstRow, 1, commonRows.length, 3).setValues(roster);
-    cw.getRange(firstRow, 5, commonRows.length, 5).setValues(scores);
+    cw.getRange(firstRow, 5, commonRows.length, 6).setValues(scores);
   });
 }
 
@@ -898,6 +974,33 @@ function syncPresenceValidation_(sheet, layout, names) {
   const rule = existing || SpreadsheetApp.newDataValidation()
     .requireValueInList(['Да', 'Нет'], true).setAllowInvalid(false).build();
   range.setDataValidations(names.map(row => [String(row[0] == null ? '' : row[0]).trim() ? rule : null]));
+}
+
+function syncCwVisibility_(central) {
+  const cw = central.getSheetByName(DM.cw);
+  if (!cw) return;
+  const rows = central.getSheetByName(DM.common)
+    .getRange(DM.commonFirstRow, 1, DM.commonLastRow - DM.commonFirstRow + 1, 4).getDisplayValues();
+  const active = new Map();
+  rows.forEach(row => {
+    const name = String(row[0]).trim();
+    if (name) active.set(name, isActiveValue_(row[3]));
+  });
+  cwBlocks_().forEach(({ firstRow, lastRow }) => {
+    const count = lastRow - firstRow + 1;
+    const names = cw.getRange(firstRow, 1, count, 1).getDisplayValues();
+    cw.showRows(firstRow, count);
+    let hiddenStart = -1;
+    for (let offset = 0; offset <= names.length; offset++) {
+      const name = offset < names.length ? String(names[offset][0]).trim() : '';
+      const hide = offset < names.length && active.get(name) === false;
+      if (hide && hiddenStart < 0) hiddenStart = offset;
+      if (!hide && hiddenStart >= 0) {
+        cw.hideRows(firstRow + hiddenStart, offset - hiddenStart);
+        hiddenStart = -1;
+      }
+    }
+  });
 }
 
 function syncVisibility_(central, plusFiles, sheetStates) {
@@ -1231,6 +1334,7 @@ function getCentralId_() {
 }
 
 function validateConfig_() {
+  validateControlWorkSettings_();
   validatePracticeTaskCounts_();
   const missing = [];
   if (!DM.centralFileId) missing.push('centralFileId');

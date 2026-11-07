@@ -10,10 +10,84 @@ builder = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(builder)
 
 from openpyxl import load_workbook
+from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 
 
 class TaskCountTemplatesTest(unittest.TestCase):
+    def test_control_work_thresholds_are_read_from_shared_config(self):
+        self.assertEqual(set(builder.load_cw_settings()), {1, 2})
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "Code.gs"
+            config.write_text("const DM = {cwRequiredSolvedTasks: {1: 3, 2: 5}};", encoding="utf8")
+            self.assertEqual(builder.load_cw_settings(config), {1: 3, 2: 5})
+            for mapping in ['1: 4', '1: 4, 2: 7', '1: 0, 2: 4', '1: 3.5, 2: 4',
+                            '1: 4, 2: "4"', '1:4, 1:5, 2:4', '1:4, 2:4, 3:4']:
+                config.write_text("const DM = {cwRequiredSolvedTasks: {" + mapping + "}};", encoding="utf8")
+                with self.subTest(mapping=mapping), self.assertRaises(ValueError):
+                    builder.load_cw_settings(config)
+
+    def test_central_templates_have_six_scored_tasks_and_independent_pass_thresholds(self):
+        wb = Workbook()
+        wb.remove(wb.active)
+        thresholds = {1: 3, 2: 5}
+        common = builder.make_common(wb, thresholds)
+        cw = builder.make_cw(wb, thresholds)
+        for kr, header, first, last in builder.CW_BLOCKS:
+            self.assertEqual([cw.cell(header, col).value for col in range(5, 11)], list("123456"))
+            self.assertIn(f"SUM(E{first}:J{first})", cw.cell(first, 4).value)
+            self.assertIn(f'1/2^(C{last}-1)', cw.cell(last, 4).value)
+            self.assertIn(f"$J${first}:$J${last}", common.cell(4, kr + 6).value)
+            self.assertIn(f'>={thresholds[kr]},"зачет"', common.cell(4, kr + 6).value)
+            rules = cw.conditional_formatting[f"A{first}:A{last}"]
+            self.assertEqual(rules[0].formula, [f'AND($A{first}<>"",COUNTIF(E{first}:J{first},">=3")>={thresholds[kr]})'])
+            self.assertTrue(any(validation.type == "decimal" and validation.formula1 == "0" and
+                                validation.formula2 == "4" and f"J{first}" in validation.sqref
+                                for validation in cw.data_validations.dataValidation))
+            self.assertFalse(cw.cell(first, 10).protection.locked)
+        self.assertIn('>=55', common['I4'].value)
+        self.assertIn('>=24', common['I4'].value)
+        self.assertIn('>=35', common['I4'].value)
+        self.assertIn('>=14', common['I4'].value)
+        self.assertIn('>=17', common['I4'].value)
+        wb.close()
+
+    def test_upgrading_old_central_workbook_preserves_scores_attempts_and_unrelated_cells(self):
+        wb = Workbook()
+        wb.remove(wb.active)
+        builder.make_common(wb)
+        cw = builder.make_cw(wb)
+        cw.delete_cols(10)
+        wb.create_sheet('Логи')['A4'] = 'Неприкосновенная запись'
+        for first, attempt, scores in [(3, 2, [4, 3.5, 1, 0, 2]), (96, 4, [0, 1, 2, 3, 4])]:
+            cw.cell(first, 1, 'Студент')
+            cw.cell(first, 3, attempt)
+            for col, value in enumerate(scores, 5):
+                cw.cell(first, col, value)
+        before = {(sheet.title, cell.coordinate): cell.value for sheet in wb for row in sheet for cell in row}
+        builder.update_central_control_works(wb, {1: 3, 2: 5})
+        changed = {('CW', f'D{row}') for _, _, first, last in builder.CW_BLOCKS for row in range(first, last + 1)}
+        changed.update(('Общий', f'{col}{row}') for row in range(4, 94) for col in 'GH')
+        for (sheet, coordinate), value in before.items():
+            if (sheet, coordinate) not in changed:
+                self.assertEqual(wb[sheet][coordinate].value, value, (sheet, coordinate))
+        cw['J3'] = 4
+        cw['J96'] = 3.5
+        count = len(cw.data_validations.dataValidation)
+        builder.update_central_control_works(wb, {1: 3, 2: 5})
+        self.assertEqual(len(cw.data_validations.dataValidation), count)
+        self.assertEqual((cw['J3'].value, cw['J96'].value), (4, 3.5))
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / 'central.xlsx'
+            wb.save(path)
+            actual = load_workbook(path)
+            self.assertEqual((actual['CW']['J3'].value, actual['CW']['J96'].value), (4, 3.5))
+            self.assertEqual(actual['CW']['C3'].value, 2)
+            self.assertEqual(actual['CW']['C96'].value, 4)
+            self.assertIn('SUM(E96:J96)', actual['CW']['D96'].value)
+            actual.close()
+        wb.close()
+
     def test_reads_shared_code_config_and_rejects_malformed_values(self):
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "Code.gs"

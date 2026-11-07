@@ -80,6 +80,7 @@ class Sheet {
     this.maxRows = 40;
     this.validations = new Map([[4, 'Да,Нет']]);
     this.formattedRows = new Set();
+    this.hiddenRows = new Set();
   }
   put(row, col, value) {
     if (!this.data[row - 1]) this.data[row - 1] = [];
@@ -103,8 +104,8 @@ class Sheet {
   showColumns(first, count) { for (let i = first; i < first + count; i++) this.hidden.delete(i); }
   getConditionalFormatRules() { return this.rules; }
   setConditionalFormatRules(rules) { this.rules = rules; }
-  showRows() {}
-  hideRows() {}
+  showRows(first, count) { for (let row = first; row < first + count; row++) this.hiddenRows.delete(row); }
+  hideRows(first, count) { for (let row = first; row < first + count; row++) this.hiddenRows.add(row); }
 }
 
 function ruleBuilder() {
@@ -124,9 +125,10 @@ function setup() {
     SpreadsheetApp: {
       newConditionalFormatRule: ruleBuilder, flush() {},
       newDataValidation: () => ({
+        requireNumberBetween(min, max) { this.min = min; this.max = max; return this; },
         requireValueInList(values, show) { this.values = values; this.show = show; return this; },
         setAllowInvalid(value) { this.allowInvalid = value; return this; },
-        build() { return { values: this.values, show: this.show, allowInvalid: this.allowInvalid }; }
+        build() { return { values: this.values, show: this.show, min: this.min, max: this.max, allowInvalid: this.allowInvalid }; }
       })
     },
     LockService: { getScriptLock: () => ({ waitLock() {}, releaseLock() {} }) }
@@ -134,6 +136,7 @@ function setup() {
   vm.runInContext(fs.readFileSync(path.join(__dirname, '../Code.gs'), 'utf8'), context);
   const dm = vm.runInContext('DM', context);
   Object.assign(dm, { practiceCount: 3, studentsPerGroup: 2, commonLastRow: 5, logMaxRow: 20 });
+  dm.practiceTaskCounts = Object.fromEntries(Object.entries(dm.practiceTaskCounts).filter(([key]) => Number(key) <= dm.practiceCount));
   dm.practiceCoefficientThresholds = {};
   const plusFiles = {};
   for (const practitioner of dm.practitioners) {
@@ -560,13 +563,210 @@ test('ordinary synchronization replaces old coefficient thresholds without chang
   assert.equal(JSON.stringify(s.data), before);
 });
 
+test('control works have independent solved-task thresholds and count all six task columns', () => {
+  const { context: c, dm } = setup();
+  dm.cwRequiredSolvedTasks = { 1: 3, 2: 5 };
+  const first = c.krStatusFormula_(4, 1);
+  const second = c.krStatusFormula_(4, 2);
+  for (const col of ['E', 'F', 'G', 'H', 'I', 'J']) {
+    assert.ok(first.includes(`'CW'!$${col}$3:$${col}$92,">=3"`));
+    assert.ok(second.includes(`'CW'!$${col}$96:$${col}$185,">=3"`));
+  }
+  assert.equal((first.match(/COUNTIFS/g) || []).length, 6);
+  assert.ok(first.endsWith('>=3,"зачет","незачет"))'));
+  assert.ok(second.endsWith('>=5,"зачет","незачет"))'));
+  for (const invalid of [null, [], {}, { 1: 4 }, { 1: 0, 2: 4 }, { 1: 4, 2: 7 },
+    { 1: '4', 2: 4 }, { 1: 3.5, 2: 4 }, { 1: 4, 2: 4, 3: 4 }]) {
+    dm.cwRequiredSolvedTasks = invalid;
+    assert.throws(() => c.validateControlWorkSettings_(), /cwRequiredSolvedTasks/);
+  }
+  dm.cwRequiredSolvedTasks = { 1: 1, 2: 6 };
+  c.validateControlWorkSettings_();
+});
+
+test('five-task CW upgrade preserves scores and attempts and applies sixth-task formulas and coloring', () => {
+  const { context: c, dm } = setup();
+  dm.cwRequiredSolvedTasks = { 1: 3, 2: 5 };
+  const cw = new Sheet('CW', 9);
+  cw.getRange(3, 1, 1, 9).setValues([['Студент', 'Рами', 2, 4.5, 4, 3.5, 1.5, 0, '']]);
+  cw.getRange(96, 1, 1, 9).setValues([['Студент', 'Артём', 3, 2, 0, 1, 4, 3, 0]]);
+  const oldFirst = cw.getRange(3, 1, 1, 9).getValues()[0];
+  const oldSecond = cw.getRange(96, 1, 1, 9).getValues()[0];
+  cw.rules = [ruleBuilder().whenFormulaSatisfied('=COUNTIF(E3:I3,">=3")>=4')
+    .setRanges([cw.getRange(3, 1, 90, 1)]).build(),
+    ruleBuilder().whenFormulaSatisfied('=C3>1').setRanges([cw.getRange(3, 3, 90, 1)]).build()];
+  const central = { getSheetByName: () => cw };
+  c.syncControlWorkLayout_(central);
+  assert.equal(cw.getMaxColumns(), 10);
+  for (const [header, first, before] of [[1, 3, oldFirst], [95, 96, oldSecond]]) {
+    assert.equal(cw.getRange(header, 10).getValue(), '6');
+    assert.deepEqual(cw.getRange(first, 1, 1, 9).getValues()[0], before);
+    assert.equal(cw.getRange(first, 4).getFormulas()[0][0],
+      `=IF(A${first}="","",SUM(E${first}:J${first})*IF(C${first}="",1,1/2^(C${first}-1)))`);
+    assert.deepEqual(cw.validations.get(first), { values: undefined, show: undefined, min: 0, max: 4, allowInvalid: false });
+  }
+  assert.ok(cw.rules.some(rule => rule.formula === '=AND($A3<>"",COUNTIF(E3:J3,">=3")>=3)'));
+  assert.ok(cw.rules.some(rule => rule.formula === '=AND($A96<>"",COUNTIF(E96:J96,">=3")>=5)'));
+  assert.ok(cw.rules.some(rule => rule.formula === '=C3>1'));
+  cw.put(3, 10, 3.5); cw.put(96, 10, 4);
+  c.syncControlWorkLayout_(central);
+  assert.equal(cw.getRange(3, 10).getValue(), 3.5);
+  assert.equal(cw.getRange(96, 10).getValue(), 4);
+  assert.equal(cw.rules.length, 3);
+  assert.equal(cw.getRange(92, 4).getFormulas()[0][0], '=IF(A92="","",SUM(E92:J92)*IF(C92="",1,1/2^(C92-1)))');
+  assert.equal(cw.getRange(185, 4).getFormulas()[0][0], '=IF(A185="","",SUM(E185:J185)*IF(C185="",1,1/2^(C185-1)))');
+});
+
+test('CW roster synchronization keeps six scores and attempts separately for each KR when students move', () => {
+  const { context: c } = setup();
+  const cw = new Sheet('CW', 10);
+  const common = new Sheet('Общий', 14);
+  common.getRange(4, 1, 3, 2).setValues([['Второй', 'Немат'], ['Студент', 'Рами'], ['Новый', 'Артём']]);
+  cw.getRange(3, 1, 2, 10).setValues([
+    ['Студент', 'Артём', 1, 0, 4, 3.5, 2, 1, 0, 3],
+    ['Второй', 'Рами', 2, 0, 1, 0, 4, 3, 2, 4]
+  ]);
+  cw.getRange(96, 1, 2, 10).setValues([
+    ['Студент', 'Артём', 3, 0, 0, 1, 2, 3, 4, 0.5],
+    ['Второй', 'Рами', 4, 0, 4, 4, 3, 2, 1, 3.5]
+  ]);
+  const central = { getSheetByName: name => name === 'CW' ? cw : common };
+  const first = cw.getRange(3, 1, 2, 10).getValues();
+  const second = cw.getRange(96, 1, 2, 10).getValues();
+  c.syncCwRoster_(central);
+  for (const [start, saved] of [[3, first], [96, second]]) {
+    const result = cw.getRange(start, 1, 3, 10).getValues();
+    assert.deepEqual(result.map(row => row.slice(0, 2)), [['Второй', 'Немат'], ['Студент', 'Рами'], ['Новый', 'Артём']]);
+    assert.equal(result[0][2], saved[1][2]); assert.equal(result[1][2], saved[0][2]);
+    assert.deepEqual(result[0].slice(4), saved[1].slice(4));
+    assert.deepEqual(result[1].slice(4), saved[0].slice(4));
+    assert.deepEqual(result[2].slice(4), Array(6).fill(''));
+  }
+  const before = JSON.stringify(cw.data);
+  c.syncCwRoster_(central);
+  assert.equal(JSON.stringify(cw.data), before);
+});
+
+test('ranking sorts by D plus CW across tiers, breaks ties by name, and excludes inactive students', () => {
+  const { context: c } = setup();
+  const common = new Sheet('Общий', 14);
+  const ranking = new Sheet('Рейтинг', 8);
+  common.getRange(4, 1, 7, 9).setValues([
+    ['Много D', 'Артём', '', 'Да', 20, 0, '', '', 'S'],
+    ['Много CW', 'Рами', '', 'Да', 5, 30, '', '', 'F'],
+    ['Высокий тир', 'Немат', '', 'Да', 1, 0, '', '', 'S'],
+    ['Дробные', 'Рами', '', 'Да', 10.25, '12,5', '', '', 'B'],
+    ['Анна', 'Артём', '', 'Да', 10, 10, '', '', 'F'],
+    ['Ушёл', 'Немат', '', 'Нет', 100, 100, '', '', 'S'],
+    ['Нет баллов', 'Рами', '', 'Да', '', '', '', '', 'F']
+  ]);
+  const original = JSON.stringify(common.data);
+  ranking.put(12, 1, 'Старая запись');
+  c.refreshRanking_({ getSheetByName: name => name === 'Общий' ? common : ranking });
+  assert.deepEqual(ranking.getRange(4, 1, 6, 1).getValues(), [
+    ['Много CW'], ['Дробные'], ['Анна'], ['Много D'], ['Высокий тир'], ['Нет баллов']
+  ]);
+  assert.deepEqual(ranking.getRange(4, 3, 1, 3).getValues(), [[5, 30, 'F']]);
+  assert.equal(ranking.getRange(12, 1).getValue(), '');
+  assert.equal(JSON.stringify(common.data), original);
+});
+
+test('CW hides inactive students in both KR blocks and restores them without changing scores or formulas', () => {
+  const { context: c, dm } = setup();
+  dm.commonLastRow = 7;
+  const cw = new Sheet('CW', 10);
+  const common = new Sheet('Общий', 14);
+  const ranking = new Sheet('Рейтинг', 8);
+  common.getRange(4, 1, 4, 9).setValues([
+    ['Остаётся', 'Артём', '', 'Да', 0, 13, '', '', 'F'],
+    ['Ушёл', 'Рами', '', 'Нет', 0, 15, '', '', 'F'],
+    ['Тоже ушёл', 'Немат', '', ' no ', 0, 10, '', '', 'F'],
+    ['Без отметки', 'Артём', '', '', 0, 0, '', '', 'F']
+  ]);
+  for (const first of [3, 96]) {
+    cw.getRange(first, 1, 4, 10).setValues([
+      ['Ушёл', 'Рами', first === 3 ? 2 : 3, 0, 4, 3.5, 2, 1, 0, 3],
+      ['Тоже ушёл', 'Немат', 1, 0, 0, 1, 2, 3, 4, 0.5],
+      ['Остаётся', 'Артём', 1, 0, 3, 4, 4, 2, '', ''],
+      ['Без отметки', 'Артём', '', 0, '', '', '', '', '', '']
+    ]);
+    cw.getRange(first, 4).setFormula(`=SUM(E${first}:J${first})`);
+  }
+  const central = { getSheetByName: name => ({ CW: cw, 'Общий': common, 'Рейтинг': ranking })[name] };
+  const original = JSON.stringify(cw.data);
+  const originalFormulas = Array.from(cw.formulas);
+  const writes = cw.writes;
+  c.syncCwVisibility_(central);
+  assert.deepEqual(Array.from(cw.hiddenRows), [3, 4, 96, 97]);
+  assert.equal(cw.writes, writes, 'visibility must not write results');
+  assert.equal(JSON.stringify(cw.data), original);
+  assert.deepEqual(Array.from(cw.formulas), originalFormulas);
+  c.refreshRanking_(central);
+  assert.deepEqual(ranking.getRange(4, 1, 2, 1).getValues(), [['Остаётся'], ['Без отметки']]);
+  assert.equal(ranking.getRange(6, 1).getValue(), '');
+  common.put(5, 4, 'Да');
+  c.openPlusFiles_ = () => ({}); c.refreshLogCoefficients_ = () => {};
+  c.refreshPlusTotals_ = () => {};
+  c.refreshCentral_(central);
+  assert.deepEqual(Array.from(cw.hiddenRows), [4, 97]);
+  assert.equal(cw.writes, writes);
+  assert.equal(JSON.stringify(cw.data), original);
+  assert.deepEqual(Array.from(cw.formulas), originalFormulas);
+  assert.ok(ranking.getRange(4, 1, 3, 1).getValues().some(row => row[0] === 'Ушёл'));
+  common.put(6, 4, 'Да');
+  c.syncCwVisibility_(central);
+  assert.equal(cw.hiddenRows.size, 0);
+  assert.equal(JSON.stringify(cw.data), original);
+});
+
+test('CW roster sync preserves both KR results for inactive students before hiding and returning them', () => {
+  const { context: c, dm } = setup();
+  dm.commonLastRow = 5;
+  const cw = new Sheet('CW', 10);
+  const common = new Sheet('Общий', 14);
+  common.getRange(4, 1, 2, 4).setValues([['Активный', 'Артём', '', 'Да'], ['Ушёл', 'Рами', '', 'Нет']]);
+  cw.getRange(3, 1, 2, 10).setValues([
+    ['Ушёл', 'Рами', 2, 0, 4, 3, 2, 1, 0, 3.5],
+    ['Активный', 'Артём', 1, 0, 3, 3, 4, 0, 1, 2]
+  ]);
+  cw.getRange(96, 1, 2, 10).setValues([
+    ['Активный', 'Артём', 1, 0, 4, 2, 3, 1, 0, 4],
+    ['Ушёл', 'Рами', 4, 0, 1, 2, 3, 4, 0.5, 0]
+  ]);
+  const central = { getSheetByName: name => name === 'CW' ? cw : common };
+  c.syncCwRoster_(central);
+  c.syncCwVisibility_(central);
+  assert.deepEqual(Array.from(cw.hiddenRows), [4, 97]);
+  assert.deepEqual(cw.getRange(4, 5, 1, 6).getValues(), [[4, 3, 2, 1, 0, 3.5]]);
+  assert.deepEqual(cw.getRange(97, 5, 1, 6).getValues(), [[1, 2, 3, 4, 0.5, 0]]);
+  assert.equal(cw.getRange(4, 3).getValue(), 2);
+  assert.equal(cw.getRange(97, 3).getValue(), 4);
+  const scores = JSON.stringify(cw.data);
+  common.put(5, 4, 'Да');
+  c.syncCwRoster_(central);
+  c.syncCwVisibility_(central);
+  assert.equal(cw.hiddenRows.size, 0);
+  assert.equal(JSON.stringify(cw.data), scores);
+});
+
+test('occupied CW sixth-task column stops upgrade before any writes', () => {
+  const { context: c } = setup();
+  const cw = new Sheet('CW', 10);
+  cw.put(95, 10, 'Примечания');
+  assert.throws(() => c.syncControlWorkLayout_({ getSheetByName: () => cw }), /столбец J занят/);
+  assert.equal(cw.writes, 0);
+});
+
 test('D formulas still trim names after synchronization', () => {
   const { context: c, dm } = setup();
   const common = new Sheet('Общий', 14);
   c.openPlusFiles_ = () => ({}); c.refreshLogCoefficients_ = () => {};
   c.refreshRanking_ = () => {}; c.refreshPlusTotals_ = () => {};
+  c.syncCwVisibility_ = () => {};
   c.refreshCentral_({ getSheetByName: () => common });
   assert.equal(common.getRange(4, 5).getFormulas()[0][0], '=IF(A4="","",SUMIF(\'Логи\'!$A$4:$A$20,TRIM(A4),\'Логи\'!$H$4:$H$20))');
+  assert.equal(common.getRange(4, 7).getFormulas()[0][0], c.krStatusFormula_(4, 1));
+  assert.equal(common.getRange(4, 8).getFormulas()[0][0], c.krStatusFormula_(4, 2));
 });
 
 // Optional real bridge integration: pass the path of the separate private repository.

@@ -19,6 +19,7 @@ ROOT = Path(__file__).parent
 PRACTICES = 15
 STUDENTS = 30
 PRACTITIONERS = ["Артём", "Рами", "Немат"]
+CW_BLOCKS = ((1, 1, 3, 92), (2, 95, 96, 185))
 
 NAVY = "17365D"
 PLUS_GREEN = "C6E0B4"
@@ -68,12 +69,34 @@ def task_label(value):
     return text
 
 
-def cw_status_formula(row, first_row, last_row):
+def load_cw_settings(config_path=ROOT / "Code.gs"):
+    source = config_path.read_text(encoding="utf-8-sig")
+    source = re.sub(r"//[^\n]*|/\*[\s\S]*?\*/", "", source)
+    match = re.search(r"\bcwRequiredSolvedTasks\s*:\s*\{([^}]*)\}", source)
+    if not match:
+        raise ValueError("Code.gs: задайте cwRequiredSolvedTasks для двух КР")
+    thresholds = {}
+    for entry in match[1].split(","):
+        if not entry.strip():
+            continue
+        item = re.fullmatch(r'''\s*(?:"([12])"|'([12])'|([12]))\s*:\s*([1-6])\s*''', entry)
+        if not item:
+            raise ValueError(f"cwRequiredSolvedTasks: неверная запись {entry!r}")
+        kr = int(next(value for value in item.groups()[:3] if value is not None))
+        if kr in thresholds:
+            raise ValueError(f"cwRequiredSolvedTasks: КР-{kr} указана дважды")
+        thresholds[kr] = int(item[4])
+    if set(thresholds) != {1, 2}:
+        raise ValueError("cwRequiredSolvedTasks: укажите для обеих КР порог от 1 до 6 задач")
+    return thresholds
+
+
+def cw_status_formula(row, first_row, last_row, required_solved=4):
     parts = [
         f'COUNTIFS(\'CW\'!$A${first_row}:$A${last_row},A{row},\'CW\'!${col}${first_row}:${col}${last_row},">=3")'
-        for col in "EFGHI"
+        for col in "EFGHIJ"
     ]
-    return f'=IF(A{row}="","",IF({"+".join(parts)}>=4,"зачет","незачет"))'
+    return f'=IF(A{row}="","",IF({"+".join(parts)}>={required_solved},"зачет","незачет"))'
 
 
 def final_grade_formula(row):
@@ -219,7 +242,8 @@ def make_common_legacy(wb):
     return ws
 
 
-def make_common(wb):
+def make_common(wb, cw_required_solved=None):
+    cw_required_solved = load_cw_settings() if cw_required_solved is None else cw_required_solved
     ws = wb.create_sheet("Общий")
     hide_top_rows(ws)
     headers = ["ФИО", "Практик", "TG", "Прод", "D", "CW", "КР-1", "КР-2", "Тир", "Бонус к CW", "Бонус к D", "Экзамен", "Задача", "Итоговая оценка"]
@@ -234,8 +258,8 @@ def make_common(wb):
         ws.cell(row, 4, "Да")
         ws.cell(row, 5, f'=IF(A{row}="","",SUMIF(\'Логи\'!$A$4:$A$3006,TRIM(A{row}),\'Логи\'!$H$4:$H$3006))')
         ws.cell(row, 6, f'=IF(A{row}="","",SUMIF(\'CW\'!$A:$A,A{row},\'CW\'!$D:$D))')
-        ws.cell(row, 7, cw_status_formula(row, 3, 92))
-        ws.cell(row, 8, cw_status_formula(row, 96, 185))
+        ws.cell(row, 7, cw_status_formula(row, 3, 92, cw_required_solved[1]))
+        ws.cell(row, 8, cw_status_formula(row, 96, 185, cw_required_solved[2]))
         ws.cell(row, 9, f'=IF(A{row}="","",IF(AND(E{row}+IF(K{row}="",0,K{row})>=55,F{row}+IF(J{row}="",0,J{row})>=24),"S",IF(AND(E{row}+IF(K{row}="",0,K{row})>=35,F{row}+IF(J{row}="",0,J{row})>=14),"A",IF(E{row}+IF(K{row}="",0,K{row})>=17,"B","F"))))')
         ws.cell(row, 10, "")
         ws.cell(row, 11, "")
@@ -267,7 +291,8 @@ def make_common(wb):
     return ws
 
 
-def make_cw(wb):
+def make_cw(wb, cw_required_solved=None):
+    cw_required_solved = load_cw_settings() if cw_required_solved is None else cw_required_solved
     ws = wb.create_sheet("CW")
     names = []
     for i, practitioner in enumerate(PRACTITIONERS):
@@ -284,26 +309,26 @@ def make_cw(wb):
         ws.cell(title, 1, f"КР-{kr}")
         ws.cell(title, 1).font = Font(size=14, bold=True, color=NAVY, name="Calibri")
         ws.cell(title, 1).fill = PatternFill("solid", fgColor="D9D9D9")
-        ws.merge_cells(start_row=title, start_column=1, end_row=title, end_column=9)
+        ws.merge_cells(start_row=title, start_column=1, end_row=title, end_column=10)
         last = first + len(names) - 1
-        for col, value in enumerate(["ФИО", "Практик", "Попытка", "S", "1", "2", "3", "4", "5"], 1):
+        for col, value in enumerate(["ФИО", "Практик", "Попытка", "S", "1", "2", "3", "4", "5", "6"], 1):
             ws.cell(header, col, value)
-        header_style(ws, header, 9)
+        header_style(ws, header, 10)
         for row, (name, _practitioner) in enumerate(names, first):
             ws.cell(row, 1, name)
             ws.cell(row, 2, _practitioner)
             ws.cell(row, 3).fill = PatternFill("solid", fgColor="FFF2CC")
             ws.cell(row, 3).protection = Protection(locked=False)
-            ws.cell(row, 4, f'=IF(A{row}="","",SUM(E{row}:I{row})*IF(C{row}="",1,1/2^(C{row}-1)))')
-            for col in range(5, 10):
+            ws.cell(row, 4, f'=IF(A{row}="","",SUM(E{row}:J{row})*IF(C{row}="",1,1/2^(C{row}-1)))')
+            for col in range(5, 11):
                 ws.cell(row, col).protection = Protection(locked=False)
                 ws.cell(row, col).fill = PatternFill("solid", fgColor=INPUT)
-        body_style(ws, first, last, 1, 9)
-        align_right(ws, first, last, [1, 3, 4, 5, 6, 7, 8, 9])
+        body_style(ws, first, last, 1, 10)
+        align_right(ws, first, last, [1, 3, 4, 5, 6, 7, 8, 9, 10])
         align_center(ws, first, last, [2])
         ws.conditional_formatting.add(
             f"A{first}:A{last}",
-            FormulaRule(formula=[f'COUNTIF(E{first}:I{first},">=3")>=4'], fill=PatternFill("solid", fgColor=PLUS_GREEN), font=Font(color="000000")),
+            FormulaRule(formula=[f'AND($A{first}<>"",COUNTIF(E{first}:J{first},">=3")>={cw_required_solved[kr]})'], fill=PatternFill("solid", fgColor=PLUS_GREEN), font=Font(color="000000")),
         )
         add_validation(ws, f"C{first}:C{last}", "1,2,3,4", "Введите целое число от 1 до 4")
         ws.data_validations.dataValidation[-1].type = "whole"
@@ -315,13 +340,13 @@ def make_cw(wb):
         score.showErrorMessage = True
         score.error = "Введите число от 0 до 4"
         ws.add_data_validation(score)
-        score.add(f"E{first}:I{last}")
+        score.add(f"E{first}:J{last}")
         output = last + 2
     ws.freeze_panes = "A2"
     ws.sheet_view.showGridLines = False
     for col, width in {"A": 27, "B": 14, "C": 12, "D": 12}.items():
         ws.column_dimensions[col].width = width
-    for col in range(5, 10):
+    for col in range(5, 11):
         ws.column_dimensions[get_column_letter(col)].width = 11
     return ws
 
@@ -468,16 +493,60 @@ def make_plus_logs(wb):
         ws.column_dimensions[col].width = width
 
 
+def update_central_control_works(wb, cw_required_solved):
+    ws = wb["CW"]
+    for kr, header, first, last in CW_BLOCKS:
+        if ws.cell(header, 10).value not in (None, "", "6", 6):
+            raise ValueError(f"КР-{kr}: столбец J занят, обновление отменено")
+    for kr, header, first, last in CW_BLOCKS:
+        if ws.cell(header, 10).value in (None, ""):
+            for row in range(header, last + 1):
+                ws.cell(row, 10)._style = copy(ws.cell(row, 9)._style)
+            ws.column_dimensions["J"].width = ws.column_dimensions["I"].width
+        ws.cell(header, 10, "6")
+        for row in range(first, last + 1):
+            ws.cell(row, 10).protection = Protection(locked=False)
+            ws.cell(row, 4, f'=IF(A{row}="","",SUM(E{row}:J{row})*IF(C{row}="",1,1/2^(C{row}-1)))')
+        score_range = f"J{first}:J{last}"
+        if not any(validation.type == "decimal" and validation.operator == "between" and
+                   validation.formula1 == "0" and validation.formula2 == "4" and
+                   score_range in validation.sqref for validation in ws.data_validations.dataValidation):
+            score = DataValidation(type="decimal", operator="between", formula1="0", formula2="4", allow_blank=True)
+            score.errorStyle = "stop"
+            score.showErrorMessage = True
+            score.error = "Введите число от 0 до 4"
+            ws.add_data_validation(score)
+            score.add(score_range)
+        name_range = f"A{first}:A{last}"
+        if name_range in ws.conditional_formatting:
+            del ws.conditional_formatting[name_range]
+        ws.conditional_formatting.add(name_range, FormulaRule(
+            formula=[f'AND($A{first}<>"",COUNTIF(E{first}:J{first},">=3")>={cw_required_solved[kr]})'],
+            fill=PatternFill("solid", fgColor=PLUS_GREEN), font=Font(color="000000")))
+        for row in range(4, 94):
+            wb["Общий"].cell(row, 6 + kr, cw_status_formula(row, first, last, cw_required_solved[kr]))
+
+
 def main():
     parser = argparse.ArgumentParser(description="Создание XLSX-шаблонов ДМ; число задач берётся из Code.gs")
     parser.add_argument("--output-dir", type=Path, default=ROOT, help="Каталог для новых шаблонов")
+    parser.add_argument("--update-central", type=Path, help="Обновить КР в существующем центральном XLSX с сохранением оценок")
     args = parser.parse_args()
+    cw_required_solved = load_cw_settings()
+    if args.update_central:
+        from openpyxl import load_workbook
+        central = load_workbook(args.update_central)
+        update_central_control_works(central, cw_required_solved)
+        central.save(args.update_central)
+        central.close()
+        print("Updated central control works")
+        return
     task_counts = load_task_counts()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     central = Workbook()
     central.remove(central.active)
-    make_common(central)
-    make_cw(central)
+    make_common(central, cw_required_solved)
+    make_cw(central, cw_required_solved)
     make_ranking(central)
     make_logs(central)
     for sheet in central.worksheets:
