@@ -114,3 +114,13 @@
 + [Про оценку сложности алгоритмов](https://ru.algorithmica.org/cs/complexity/asymptotic/)
 > Как правильно оценивать скорость работу алгоритмов независимо от железа.
 
+---
+
+### Практика 8. Графы. Пути и деревья | [ser-8](practice_sheets/practice8/practice8.pdf)
+
+> Продолжаем изучать графы. На этот раз побольше поработаем с деревьями.
+
++ [Карпов. Теория графов](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/literature/graphs_dk.pdf)
+> Книга Дмитрия Валерьевича. Расширенный вариант лекций.
+
++ [Иванов. Элементарная математика - глава 6](literature/Ivanov_Oleg_Elementarnaya_matematika_dlya_shkolnikov_studentov_i.pdf#page=196)
