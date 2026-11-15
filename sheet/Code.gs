@@ -494,9 +494,8 @@ function validatePracticeCoefficientThresholds_() {
       throw new Error(`Практика ${practice}: укажите ровно четыре границы: '0.5', '0.8', '1' и '1.25'.`);
     }
     const values = coefficientKeys.map(coefficient => thresholds[coefficient]);
-    const taskCount = practiceTaskCount_(practice);
-    if (values.some(value => !Number.isInteger(value) || value < 0 || value > taskCount)) {
-      throw new Error(`Практика ${practice}: каждая граница должна быть целым числом от 0 до ${taskCount}.`);
+    if (values.some(value => !Number.isSafeInteger(value) || value < 0)) {
+      throw new Error(`Практика ${practice}: каждая граница должна быть неотрицательным целым числом. Порог может превышать количество задач.`);
     }
     if (values[0] !== 0) {
       throw new Error(`Практика ${practice}: коэффициент 0.5 должен начинаться с 0 задач.`);

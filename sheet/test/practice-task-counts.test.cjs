@@ -476,13 +476,42 @@ test('custom coefficient boundaries are validated and used per practice', () => 
   for (const invalid of [
     { 2: { '0.5': 1, '0.8': 7, '1': 12, '1.25': 20 } },
     { 2: { '0.5': 0, '0.8': 12, '1': 7, '1.25': 20 } },
-    { 2: { '0.5': 0, '0.8': 7, '1': 12, '1.25': 26 } },
+    ...[-1, 20.5, '26', Infinity, NaN, Number.MAX_SAFE_INTEGER + 1].map(value =>
+      ({ 2: { '0.5': 0, '0.8': 7, '1': 12, '1.25': value } })),
     { 2: { '0.5': 0, '0.8': 7, '1': 12 } },
     { 4: { '0.5': 0, '0.8': 7, '1': 12, '1.25': 20 } }
   ]) {
     dm.practiceCoefficientThresholds = invalid;
     assert.throws(() => c.validatePracticeTaskCounts_());
   }
+});
+
+test('unreachable coefficient threshold applies to all practitioners without adding tasks or losing marks', () => {
+  const { context: c, dm, central, plusFiles, sheet } = setup();
+  dm.practiceTaskCounts = { 2: 20 };
+  dm.practiceCoefficientThresholds = { 2: { '0.5': 0, '0.8': 10, '1': 15, '1.25': 21 } };
+  const marks = Array.from({ length: 20 }, (_, index) => index % 2 ? '1' : '+');
+  for (const name of dm.practitioners) {
+    const layout = c.plusLayout_(name, 2);
+    sheet(name, 2).getRange(4, layout.taskFirstCol, 1, 20).setValues([marks]);
+  }
+  c.syncPracticeTaskLayouts_(central, plusFiles);
+  for (const name of dm.practitioners) {
+    const layout = c.plusLayout_(name, 2);
+    const s = sheet(name, 2);
+    const solved = c.columnLabel_(layout.solvedCol);
+    const first = c.columnLabel_(layout.taskFirstCol);
+    const last = c.columnLabel_(layout.taskLastCol);
+    assert.equal(c.practiceTaskHeaders_(s, layout).length, 20);
+    assert.deepEqual(s.getRange(4, layout.taskFirstCol, 1, 20).getValues(), [marks]);
+    assert.equal(s.getRange(4, layout.coefficientCol).getFormulas()[0][0],
+      `=IF(A4="","",IF(${solved}4>=21,1.25,IF(${solved}4>=15,1,IF(${solved}4>=10,0.8,0.5))))`);
+    assert.equal(s.getRange(4, layout.solvedCol).getFormulas()[0][0],
+      `=IF(A4="","",COUNTIF(${first}4:${last}4,"+")+COUNTIF(${first}4:${last}4,"1"))`);
+    assert.ok(s.rules.some(rule => rule.formula === `=AND($A4<>"",${solved}4>=15,${solved}4<21)`));
+  }
+  dm.practiceCoefficientThresholds[2] = { '0.5': 0, '0.8': 21, '1': 22, '1.25': 777 };
+  c.validatePracticeTaskCounts_();
 });
 
 test('expanded roster repairs row 34 and grows the grid without changing marks', () => {
