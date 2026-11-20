@@ -337,17 +337,17 @@ function appendNormalLog_(central, plusFile, plusSheet, practitionerNo,
     ? logs.getRange(DM.logFirstRow, 1, lastRow - DM.logFirstRow + 1, 9).getDisplayValues() : [];
   let studentExit = 0;
   let pairCount = 0;
-  let duplicateCount = 0;
+  let hasExistingEntry = false;
 
   rows.forEach(row => {
     if (String(row[0]).trim() !== studentName || !isNormalLogRow_(row)) return;
     if (Number(row[2]) <= practiceNo) studentExit++;
     if (Number(row[2]) === practiceNo) pairCount++;
-    if (Number(row[2]) === practiceNo && tasksEqual_(row[3], taskName)) duplicateCount++;
+    if (Number(row[2]) === practiceNo && tasksEqual_(row[3], taskName)) hasExistingEntry = true;
   });
 
+  if (hasExistingEntry) return { ok: true };
   if (pairCount >= 2) return { ok: false, message: 'У студента уже два выхода за эту практику.' };
-  if (duplicateCount > 0) return { ok: false, message: 'Эта задача уже есть в логах.' };
 
   const plusFirst = DM.plusFirstRow;
   const studentRow = findStudentRow_(plusSheet, studentName, plusFirst, plusFirst + DM.studentsPerGroup - 1);

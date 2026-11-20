@@ -237,7 +237,7 @@ test('reindexing covers the whole ladder including zero-base exits and removal a
   assert.equal(logs.getRange(5, 9).getValue(), 'Назначен');
 });
 
-test('appending a backdated series uses earlier series only and retains duplicate and two-exit guards', () => {
+test('appending a backdated series reuses existing entries and limits only new exits', () => {
   const { context: c, logs, central, plusFiles, sheet } = setup();
   c.isStudentActive_ = () => true;
   logs.getRange(4, 1, 3, 11).setValues([1, 2, 3].map((practice, i) => [
@@ -246,12 +246,45 @@ test('appending a backdated series uses earlier series only and retains duplicat
   sheet('Артём', 2).put(4, 4, 1);
   const append = task => c.appendNormalLog_(central, plusFiles['Артём'], sheet('Артём', 2),
     1, 'Артём', 2, 'Студент', task);
-  assert.match(append(1).message, /уже есть в логах/);
+  logs.put(5, 10, 0.75);
+  logs.put(5, 11, new Date(2026, 10, 21));
+  logs.getRange(5, 8).setFormula('=F5*G5+J5');
+  const before = logs.getRange(4, 1, 3, 11).getValues();
+  const formulas = Array.from(logs.formulas);
+  assert.equal(append(1).ok, true);
+  assert.deepEqual(logs.getRange(4, 1, 3, 11).getValues(), before);
+  assert.deepEqual(Array.from(logs.formulas), formulas);
+  assert.equal(c.findLastLogRow_(logs), 6);
   assert.equal(append(2).ok, true);
   assert.deepEqual(logs.getRange(7, 5, 1, 3).getValues(), [[3, 6, 1]]);
+  assert.equal(append(1).ok, true);
+  assert.equal(append(2).ok, true);
+  assert.equal(c.findLastLogRow_(logs), 7);
   assert.match(append(3).message, /уже два выхода/);
   c.refreshLogCoefficients_(central, plusFiles);
   assert.deepEqual(logs.getRange(6, 5, 1, 2).getValues(), [[4, 5]]);
+});
+
+test('putting 1 back accepts an existing log without reverting the cell or counting a third exit', () => {
+  const { context: c, dm, logs, central, plusFiles, sheet } = setup();
+  dm.centralFileId = 'central';
+  dm.practiceTaskCounts = {};
+  c.isStudentActive_ = () => true;
+  c.SpreadsheetApp.openById = () => central;
+  let refreshed = 0;
+  c.refreshCentral_ = () => { refreshed++; };
+  const s = sheet('Артём', 2);
+  s.put(4, 7, '1');
+  logs.getRange(4, 1, 2, 11).setValues([
+    ['Студент', 'Артём', 2, 1, 1, 6, 1, 6, 'Назначен', '', new Date(2026, 10, 20)],
+    ['Студент', 'Артём', 2, 2, 2, 6, 1, 6, 'Назначен', 0.5, new Date(2026, 10, 21)]
+  ]);
+  const before = JSON.stringify(logs.data);
+  c.handlePlusEdit_({ range: s.getRange(4, 7), oldValue: '+', source: plusFiles['Артём'] }, 'Артём');
+  assert.equal(s.getRange(4, 7).getValue(), '1');
+  assert.equal(refreshed, 1);
+  assert.equal(JSON.stringify(logs.data), before);
+  assert.equal(c.findLastLogRow_(logs), 5);
 });
 
 test('config applies shared counts, default, different Rami offset, and validates inputs', () => {
