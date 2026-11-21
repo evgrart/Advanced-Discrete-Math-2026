@@ -124,3 +124,12 @@
 > Книга Дмитрия Валерьевича. Расширенный вариант лекций.
 
 + [Иванов. Элементарная математика - глава 6](literature/Ivanov_Oleg_Elementarnaya_matematika_dlya_shkolnikov_studentov_i.pdf#page=196)
+
+---
+
+### Практика 9. Графы. Связность | [ser-9](practice_sheets/practice9/practice9.pdf)
+
+> Порешаем задачи на любимую тему ДВК в графах - связность.
+
++ [Карпов. Теория графов](https://github.com/evgrart/Advanced-Discrete-Math-2026/blob/main/literature/graphs_dk.pdf)
+> Книга Дмитрия Валерьевича. Расширенный вариант лекций.
