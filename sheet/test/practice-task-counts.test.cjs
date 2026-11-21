@@ -402,7 +402,7 @@ test('pending counts reject edits instead of deleting or creating log entries', 
   dm.practiceTaskCounts = { 2: 25 };
   const s = sheet('Артём', 2);
   const event = { range: s.getRange(4, 6), source: {} };
-  assert.throws(() => c.handlePlusEdit_(event, 'Артём'), /Применить задачи и коэффициенты/);
+  assert.throws(() => c.handlePlusEdit_(event, 'Артём'), /DM система → Синхронизация/);
   assert.equal(s.writes, 0);
 });
 
@@ -857,7 +857,7 @@ if (process.env.DM_BOT_BRIDGE_PATH) {
         assert.equal(result.students[0].slots, 2);
       }
       dm.practiceTaskCounts[2] = 24;
-      assert.throws(() => c.bridge_readDistributionProblem_(dm.practitioners.indexOf(name) + 1, 2), /Применить задачи и коэффициенты/);
+      assert.throws(() => c.bridge_readDistributionProblem_(dm.practitioners.indexOf(name) + 1, 2), /Синхронизация|Применить задачи и коэффициенты/);
     });
   }
 }

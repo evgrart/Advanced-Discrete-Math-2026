@@ -90,17 +90,9 @@ function plusLayout_(practitioner, practice) {
 }
 
 function onOpen() {
-  const ui = SpreadsheetApp.getUi();
-  const menu = ui.createMenu('DM система')
-    .addItem('Настроить 4 файла', 'installDmSystem')
-    .addItem('Синхронизировать группы', 'syncGroups_')
-    .addItem('Применить задачи и коэффициенты', 'applyPracticeTaskCounts')
-    .addItem('Применить настройки КР', 'applyControlWorkSettings')
-    .addItem('Синхронизировать таблицу', 'syncTable');
-  if (typeof telegramMenu_ === 'function') {
-    menu.addSubMenu(telegramMenu_(ui));
-  }
-  menu.addToUi();
+  SpreadsheetApp.getUi().createMenu('DM система')
+    .addItem('Синхронизация', 'installDmSystem')
+    .addToUi();
 }
 
 function installDmSystem() {
@@ -520,7 +512,7 @@ function practiceTaskHeaders_(sheet, layout) {
 function assertPracticeTaskLayout_(sheet, layout, practice) {
   const headers = practiceTaskHeaders_(sheet, layout);
   if (headers.length !== practiceTaskCount_(practice)) {
-    throw new Error(`Практика ${practice}: количество столбцов не совпадает с конфигом. Выполните «DM система → Применить задачи и коэффициенты» в общей таблице.`);
+    throw new Error(`Практика ${practice}: количество столбцов не совпадает с конфигом. Выполните «DM система → Синхронизация» в общей таблице.`);
   }
 }
 
